@@ -9,11 +9,15 @@ import hashlib
 import json
 import numpy as np
 import concurrent.futures
+import threading
 
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 IMAGE_INFO_FILE = 'image_info.json'
+url_queue = deque()
+visited_urls = set()
+lock = threading.Lock()
 
 def load_image_info():
     if os.path.exists(IMAGE_INFO_FILE):
@@ -25,45 +29,59 @@ def save_image_info(image_info):
     with open(IMAGE_INFO_FILE, 'w') as f:
         json.dump(image_info, f)
 
-def download_images(url, folder_name='downloaded_images', max_depth=1, max_workers=10):
+def download_images(url, folder_name='downloaded_images', max_depth=1, max_workers=5):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
     image_info = load_image_info()
-
-    visited_urls = set()
-    url_queue = deque([(url.rstrip('/'), 0)])
+    url_queue.append((url.rstrip('/'), 0))
     img_urls = set()
 
-    while url_queue:
-        current_url, depth = url_queue.popleft()
-        if current_url in visited_urls or depth > max_depth:
-            continue
+    def fetch_and_parse_url():
+        while True:
+            with lock:
+                if not url_queue:
+                    return
+                current_url, depth = url_queue.popleft()
+            
+            if current_url in visited_urls or depth > max_depth:
+                continue
 
-        print(f"Processing page: {current_url} at depth {depth}")
-        response = requests.get(current_url)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        visited_urls.add(current_url)
+            print(f"Processing page: {current_url} at depth {depth}")
+            try:
+                response = requests.get(current_url)
+                response.raise_for_status()
+                soup = BeautifulSoup(response.content, 'html.parser')
+                with lock:
+                    visited_urls.add(current_url)
 
-        img_tags = soup.find_all('img')
-        for img in img_tags:
-            img_url = img.get('src')
-            img_url = urljoin(current_url, img_url)
-            if img_url not in image_info and img_url not in img_urls:
-                img_urls.add(img_url)
+                img_tags = soup.find_all('img')
+                for img in img_tags:
+                    img_url = img.get('src')
+                    img_url = urljoin(current_url, img_url)
+                    with lock:
+                        if img_url not in image_info and img_url not in img_urls:
+                            img_urls.add(img_url)
 
-            # Get page links from image tags if available
-            link_tag = img.parent if img.parent.name == 'a' else None
-            if link_tag:
-                next_page_url = link_tag.get('href').rstrip('/')
-                next_page_url = urljoin(current_url, next_page_url)
-                if next_page_url not in visited_urls:
-                    url_queue.append((next_page_url, depth + 1))
+                link_tags = soup.find_all('a')
+                with lock:
+                    for link in link_tags:
+                        next_page_url = link.get('href')
+                        if next_page_url:
+                            next_page_url = urljoin(current_url, next_page_url).rstrip('/')
+                            if next_page_url not in visited_urls:
+                                url_queue.append((next_page_url, depth + 1))
+            except requests.RequestException as e:
+                print(f"Failed to fetch URL: {current_url}, error: {e}")
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_url = {executor.submit(download_image, img_url, folder_name, image_info): img_url for img_url in img_urls}
-        for future in concurrent.futures.as_completed(future_to_url):
-            img_url = future_to_url[future]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as fetch_executor:
+        fetch_futures = [fetch_executor.submit(fetch_and_parse_url) for _ in range(max_workers)]
+        concurrent.futures.wait(fetch_futures)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as download_executor:
+        download_futures = {download_executor.submit(download_image, img_url, folder_name, image_info): img_url for img_url in img_urls}
+        for future in concurrent.futures.as_completed(download_futures):
+            img_url = download_futures[future]
             try:
                 future.result()
             except Exception as exc:
