@@ -1,14 +1,13 @@
-import hashlib
-import json
 import os
-from collections import deque
-from io import BytesIO
-from urllib.parse import urljoin, urlparse
-
-import numpy as np
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+from collections import deque
 from PIL import Image, ImageFile
+from io import BytesIO
+import hashlib
+import json
+import numpy as np
 
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -74,11 +73,15 @@ def download_image(img_url, folder_name, image_info):
         img = Image.open(BytesIO(img_response.content))
         img_hash = calculate_image_hash(img_response.content)
         
-        img_name = os.path.join(folder_name, os.path.basename(urlparse(img_url).path))
+        base_name = os.path.basename(urlparse(img_url).path)
+        img_name = os.path.join(folder_name, base_name)
 
+        # Check for existing files and prepend numbers if necessary
         if os.path.exists(img_name):
-            print(f"Already downloaded: {img_name}")
-            return
+            prefix = 1
+            while os.path.exists(img_name):
+                img_name = os.path.join(folder_name, f"{prefix:02d}_{base_name}")
+                prefix += 1
 
         with open(img_name, 'wb') as img_file:
             img_file.write(img_response.content)
