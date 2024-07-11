@@ -10,10 +10,10 @@ def download_images(url, folder_name='downloaded_images', num_pages=1):
 
     visited_urls = set()
     image_urls = set()
-    url_queue = deque([url])
+    url_queue = deque([url.rstrip('/')])
 
     while url_queue and num_pages > 0:
-        current_url = url_queue.popleft()
+        current_url = url_queue.popleft().rstrip('/')
         if current_url in visited_urls:
             continue
 
@@ -33,7 +33,7 @@ def download_images(url, folder_name='downloaded_images', num_pages=1):
             # Get page links from image tags if available
             link_tag = img.parent if img.parent.name == 'a' else None
             if link_tag:
-                next_page_url = link_tag.get('href')
+                next_page_url = link_tag.get('href').rstrip('/')
                 next_page_url = urljoin(current_url, next_page_url)
                 if next_page_url not in visited_urls:
                     url_queue.append(next_page_url)
@@ -55,7 +55,6 @@ def download_image(img_url, folder_name):
 
 # Usage
 if __name__ == "__main__":
-    # website_url = input("Enter the website URL: ")
-    website_url = "https://www.amourhub.com"
+    website_url = input("Enter the website URL: ")
     num_pages = int(input("Enter the number of pages to follow: "))
     download_images(website_url, num_pages=num_pages)
