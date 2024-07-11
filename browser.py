@@ -124,6 +124,10 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
                 await asyncio.gather(*img_download_tasks[:max_workers])
                 img_download_tasks = img_download_tasks[max_workers:]
 
+        # Ensure any remaining image download tasks are completed
+        if img_download_tasks:
+            await asyncio.gather(*img_download_tasks)
+
     save_image_info(image_info)
     print("All images have been downloaded.")
 
