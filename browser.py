@@ -1,16 +1,10 @@
 import os
-import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from PIL import Image, ImageFile
 from io import BytesIO
 import hashlib
 import json
-import numpy as np
-import concurrent.futures
-import threading
-import time
-from collections import defaultdict
 import aiohttp
 import asyncio
 
@@ -20,7 +14,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 IMAGE_INFO_FILE = 'image_info.json'
 visited_urls = set()
 img_urls = set()
-lock = threading.Lock()
+lock = asyncio.Lock()
 
 def load_image_info():
     if os.path.exists(IMAGE_INFO_FILE):
@@ -44,13 +38,13 @@ async def process_url(session, url, depth, max_depth, image_info):
     try:
         html = await fetch_url(session, url)
         soup = BeautifulSoup(html, 'html.parser')
-        with lock:
+        async with lock:
             visited_urls.add(url)
 
         new_img_urls = set()
         for img in soup.find_all('img'):
             img_url = urljoin(url, img.get('src'))
-            with lock:
+            async with lock:
                 if img_url not in img_urls and img_url not in image_info:
                     new_img_urls.add(img_url)
                     img_urls.add(img_url)
@@ -58,7 +52,7 @@ async def process_url(session, url, depth, max_depth, image_info):
         new_urls = []
         for link in soup.find_all('a'):
             next_page_url = urljoin(url, link.get('href')).rstrip('/')
-            with lock:
+            async with lock:
                 if next_page_url not in visited_urls:
                     new_urls.append((next_page_url, depth + 1))
 
@@ -95,7 +89,7 @@ async def download_image(session, img_url, folder_name, image_info):
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
 
-async def download_images_async(url, folder_name='downloaded_images', max_depth=1, max_workers=10):
+async def download_images_async(url, folder_name='downloaded_images', max_depth=1, max_workers=50):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
