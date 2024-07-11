@@ -120,9 +120,11 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
 
             tasks = new_tasks[:max_workers]  # Limit concurrent tasks
             
-            if len(img_download_tasks) >= max_workers or (not tasks and img_download_tasks):
-                await asyncio.gather(*img_download_tasks[:max_workers])
+            # Process image downloads
+            while img_download_tasks:
+                batch = img_download_tasks[:max_workers]
                 img_download_tasks = img_download_tasks[max_workers:]
+                await asyncio.gather(*batch)
 
         # Ensure any remaining image download tasks are completed
         if img_download_tasks:
