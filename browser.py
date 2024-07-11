@@ -29,7 +29,7 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
             img_url = img.get('src')
             img_url = urljoin(current_url, img_url)
             if img_url not in image_urls:
-                download_image(img_url, folder_name)
+                download_image_if_needed(img_url, folder_name)
                 image_urls.add(img_url)
 
             # Get page links from image tags if available
@@ -42,7 +42,7 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
 
     print("All images have been downloaded.")
 
-def download_image(img_url, folder_name):
+def download_image_if_needed(img_url, folder_name):
     img_name = os.path.join(folder_name, os.path.basename(urlparse(img_url).path))
     hd_img_name = append_hd_to_filename(img_name)
 
@@ -50,12 +50,14 @@ def download_image(img_url, folder_name):
         print(f"Already downloaded: {hd_img_name}")
         return
 
-    img_response = requests.get(img_url)
     try:
+        # Check the image resolution by downloading only the first few KBs
+        img_response = requests.get(img_url, headers={'Range': 'bytes=0-10240'}, stream=True)
+        img_response.raise_for_status()
         img = Image.open(BytesIO(img_response.content))
         img_size = img.size
-    except (IOError, Image.UnidentifiedImageError):
-        print(f"Failed to identify image at URL: {img_url}")
+    except (requests.HTTPError, IOError, Image.UnidentifiedImageError) as e:
+        print(f"Failed to identify image at URL: {img_url}, error: {e}")
         return
 
     if os.path.exists(img_name):
@@ -67,8 +69,11 @@ def download_image(img_url, folder_name):
             print(f"Already downloaded: {img_name}")
             return
 
-    img.save(img_name)
-    print(f"Downloaded {img_name}")
+    # Download the full image
+    img_response = requests.get(img_url)
+    with open(img_name, 'wb') as img_file:
+        img_file.write(img_response.content)
+        print(f"Downloaded {img_name}")
 
 def append_hd_to_filename(file_path):
     file_name, file_ext = os.path.splitext(file_path)
