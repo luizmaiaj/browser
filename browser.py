@@ -1,21 +1,37 @@
+import hashlib
+import json
 import os
+from collections import deque
+from io import BytesIO
+from urllib.parse import urljoin, urlparse
+
+import numpy as np
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
-from collections import deque
 from PIL import Image, ImageFile
-from io import BytesIO
-import hashlib
 
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+IMAGE_INFO_FILE = 'image_info.json'
+
+def load_image_info():
+    if os.path.exists(IMAGE_INFO_FILE):
+        with open(IMAGE_INFO_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_image_info(image_info):
+    with open(IMAGE_INFO_FILE, 'w') as f:
+        json.dump(image_info, f)
 
 def download_images(url, folder_name='downloaded_images', max_depth=1):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
+    image_info = load_image_info()
+
     visited_urls = set()
-    image_hashes = set()
     url_queue = deque([(url.rstrip('/'), 0)])
 
     while url_queue:
@@ -32,8 +48,10 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
         for img in img_tags:
             img_url = img.get('src')
             img_url = urljoin(current_url, img_url)
-            if not is_image_downloaded(img_url, folder_name, image_hashes):
-                download_image(img_url, folder_name, image_hashes)
+            if img_url not in image_info:
+                download_image(img_url, folder_name, image_info)
+            else:
+                print(f"Image already downloaded: {img_url}")
 
             # Get page links from image tags if available
             link_tag = img.parent if img.parent.name == 'a' else None
@@ -43,32 +61,20 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
                 if next_page_url not in visited_urls:
                     url_queue.append((next_page_url, depth + 1))
 
+    save_image_info(image_info)
     print("All images have been downloaded.")
+    # remove_duplicates(folder_name, image_info)
+    # save_image_info(image_info)
+    # print("Duplicates removed.")
 
-def is_image_downloaded(img_url, folder_name, image_hashes):
-    # Download initial bytes to inspect the image
-    try:
-        img_response = requests.get(img_url, headers={'Range': 'bytes=0-10240'}, stream=True)
-        img_response.raise_for_status()
-        img = Image.open(BytesIO(img_response.content))
-        img_hash = calculate_image_hash(img_response.content)
-
-        if img_hash in image_hashes:
-            print(f"Image already downloaded (hash match): {img_url}")
-            return True
-        return False
-    except (requests.HTTPError, IOError, Image.UnidentifiedImageError) as e:
-        print(f"Failed to identify image at URL: {img_url}, error: {e}")
-        return True
-
-def download_image(img_url, folder_name, image_hashes):
+def download_image(img_url, folder_name, image_info):
     try:
         img_response = requests.get(img_url)
         img_response.raise_for_status()
         img = Image.open(BytesIO(img_response.content))
         img_hash = calculate_image_hash(img_response.content)
         
-        img_name = os.path.join(folder_name, f"{img_hash}.jpg")
+        img_name = os.path.join(folder_name, os.path.basename(urlparse(img_url).path))
 
         if os.path.exists(img_name):
             print(f"Already downloaded: {img_name}")
@@ -77,7 +83,7 @@ def download_image(img_url, folder_name, image_hashes):
         with open(img_name, 'wb') as img_file:
             img_file.write(img_response.content)
             print(f"Downloaded {img_name}")
-        image_hashes.add(img_hash)
+        image_info[img_url] = {'hash': img_hash, 'filename': img_name}
     except (requests.HTTPError, IOError, Image.UnidentifiedImageError) as e:
         print(f"Failed to download image at URL: {img_url}, error: {e}")
 
@@ -85,6 +91,39 @@ def calculate_image_hash(img_bytes):
     hash_md5 = hashlib.md5()
     hash_md5.update(img_bytes)
     return hash_md5.hexdigest()
+
+def remove_duplicates(folder_name, image_info):
+    images = {}
+    for info in image_info.values():
+        file_path = info['filename']
+        try:
+            img = Image.open(file_path)
+            img_array = np.array(img)
+            img_hash = calculate_image_content_hash(img_array)
+            img_size = img.size
+            
+            if img_hash in images:
+                existing_file = images[img_hash]['file_path']
+                existing_size = images[img_hash]['size']
+                
+                if img_size[0] * img_size[1] > existing_size[0] * existing_size[1]:
+                    os.remove(existing_file)
+                    images[img_hash] = {'file_path': file_path, 'size': img_size}
+                    print(f"Removed lower resolution duplicate: {existing_file}")
+                else:
+                    os.remove(file_path)
+                    print(f"Removed lower resolution duplicate: {file_path}")
+                    # Update image_info to reflect the removal
+                    for url, info in list(image_info.items()):
+                        if info['filename'] == file_path:
+                            del image_info[url]
+            else:
+                images[img_hash] = {'file_path': file_path, 'size': img_size}
+        except (IOError, Image.UnidentifiedImageError) as e:
+            print(f"Failed to process image file {file_path}, error: {e}")
+
+def calculate_image_content_hash(img_array):
+    return hashlib.md5(img_array.tobytes()).hexdigest()
 
 # Usage
 if __name__ == "__main__":
