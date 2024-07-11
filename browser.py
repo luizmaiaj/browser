@@ -2,7 +2,6 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-from collections import deque
 from PIL import Image, ImageFile
 from io import BytesIO
 import hashlib
@@ -10,12 +9,15 @@ import json
 import numpy as np
 import concurrent.futures
 import threading
+import time
+from collections import defaultdict
+import aiohttp
+import asyncio
 
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 IMAGE_INFO_FILE = 'image_info.json'
-url_queue = deque()
 visited_urls = set()
 img_urls = set()
 lock = threading.Lock()
@@ -30,83 +32,48 @@ def save_image_info(image_info):
     with open(IMAGE_INFO_FILE, 'w') as f:
         json.dump(image_info, f)
 
-def download_images(url, folder_name='downloaded_images', max_depth=1, max_workers=20):
-    if not os.path.exists(folder_name):
-        os.makedirs(folder_name)
+async def fetch_url(session, url):
+    async with session.get(url) as response:
+        return await response.text()
 
-    image_info = load_image_info()
-    url_queue.append((url.rstrip('/'), 0))
+async def process_url(session, url, depth, max_depth):
+    if url in visited_urls or depth > max_depth:
+        return []
 
-    def fetch_and_parse_url(current_url, depth):
-        if current_url in visited_urls or depth > max_depth:
-            return
-
-        print(f"Processing page: {current_url} at depth {depth}")
-        try:
-            response = requests.get(current_url)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, 'html.parser')
-            with lock:
-                visited_urls.add(current_url)
-
-            img_tags = soup.find_all('img')
-            for img in img_tags:
-                img_url = img.get('src')
-                img_url = urljoin(current_url, img_url)
-                with lock:
-                    if img_url not in image_info and img_url not in img_urls:
-                        img_urls.add(img_url)
-
-            link_tags = soup.find_all('a')
-            new_urls = []
-            for link in link_tags:
-                next_page_url = link.get('href')
-                if next_page_url:
-                    next_page_url = urljoin(current_url, next_page_url).rstrip('/')
-                    with lock:
-                        if next_page_url not in visited_urls:
-                            new_urls.append((next_page_url, depth + 1))
-            
-            return new_urls
-        except requests.RequestException as e:
-            print(f"Failed to fetch URL: {current_url}, error: {e}")
-            return []
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_url = {executor.submit(fetch_and_parse_url, url_queue[0][0], url_queue[0][1]): url_queue[0]}
-        
-        while future_to_url:
-            done, _ = concurrent.futures.wait(future_to_url, return_when=concurrent.futures.FIRST_COMPLETED)
-            
-            for future in done:
-                url, depth = future_to_url.pop(future)
-                try:
-                    new_urls = future.result()
-                    if new_urls:
-                        for new_url, new_depth in new_urls:
-                            if new_depth <= max_depth:
-                                future_to_url[executor.submit(fetch_and_parse_url, new_url, new_depth)] = (new_url, new_depth)
-                except Exception as exc:
-                    print(f"{url} generated an exception: {exc}")
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as download_executor:
-        download_futures = {download_executor.submit(download_image, img_url, folder_name, image_info): img_url for img_url in img_urls}
-        for future in concurrent.futures.as_completed(download_futures):
-            img_url = download_futures[future]
-            try:
-                future.result()
-            except Exception as exc:
-                print(f"{img_url} generated an exception: {exc}")
-
-    save_image_info(image_info)
-    print("All images have been downloaded.")
-
-def download_image(img_url, folder_name, image_info):
+    print(f"Processing page: {url} at depth {depth}")
     try:
-        img_response = requests.get(img_url)
-        img_response.raise_for_status()
-        img = Image.open(BytesIO(img_response.content))
-        img_hash = calculate_image_hash(img_response.content)
+        html = await fetch_url(session, url)
+        soup = BeautifulSoup(html, 'html.parser')
+        with lock:
+            visited_urls.add(url)
+
+        new_img_urls = set()
+        for img in soup.find_all('img'):
+            img_url = urljoin(url, img.get('src'))
+            with lock:
+                if img_url not in img_urls:
+                    new_img_urls.add(img_url)
+                    img_urls.add(img_url)
+
+        new_urls = []
+        for link in soup.find_all('a'):
+            next_page_url = urljoin(url, link.get('href')).rstrip('/')
+            with lock:
+                if next_page_url not in visited_urls:
+                    new_urls.append((next_page_url, depth + 1))
+
+        return list(new_img_urls), new_urls
+    except Exception as e:
+        print(f"Failed to fetch URL: {url}, error: {e}")
+        return [], []
+
+async def download_image(session, img_url, folder_name, image_info):
+    try:
+        async with session.get(img_url) as response:
+            img_content = await response.read()
+        
+        img = Image.open(BytesIO(img_content))
+        img_hash = calculate_image_hash(img_content)
         
         base_name = os.path.basename(urlparse(img_url).path)
         img_name = os.path.join(folder_name, base_name)
@@ -119,19 +86,49 @@ def download_image(img_url, folder_name, image_info):
                 prefix += 1
 
         with open(img_name, 'wb') as img_file:
-            img_file.write(img_response.content)
+            img_file.write(img_content)
             print(f"Downloaded {img_name}")
         image_info[img_url] = {'hash': img_hash, 'filename': img_name}
-    except (requests.HTTPError, IOError, Image.UnidentifiedImageError) as e:
+    except Exception as e:
         print(f"Failed to download image at URL: {img_url}, error: {e}")
 
 def calculate_image_hash(img_bytes):
-    hash_md5 = hashlib.md5()
-    hash_md5.update(img_bytes)
-    return hash_md5.hexdigest()
+    return hashlib.md5(img_bytes).hexdigest()
+
+async def download_images_async(url, folder_name='downloaded_images', max_depth=1, max_workers=10):
+    if not os.path.exists(folder_name):
+        os.makedirs(folder_name)
+
+    image_info = load_image_info()
+    
+    async with aiohttp.ClientSession() as session:
+        tasks = [process_url(session, url, 0, max_depth)]
+        img_download_tasks = []
+
+        while tasks:
+            new_tasks = []
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for result in results:
+                if isinstance(result, Exception):
+                    print(f"An error occurred: {result}")
+                    continue
+                
+                new_img_urls, new_urls = result
+                img_download_tasks.extend([download_image(session, img_url, folder_name, image_info) for img_url in new_img_urls])
+                new_tasks.extend([process_url(session, new_url, new_depth, max_depth) for new_url, new_depth in new_urls if new_depth <= max_depth])
+
+            tasks = new_tasks[:max_workers]  # Limit concurrent tasks
+            
+            if len(img_download_tasks) >= max_workers or (not tasks and img_download_tasks):
+                await asyncio.gather(*img_download_tasks[:max_workers])
+                img_download_tasks = img_download_tasks[max_workers:]
+
+    save_image_info(image_info)
+    print("All images have been downloaded.")
 
 # Usage
 if __name__ == "__main__":
     website_url = input("Enter the website URL: ")
     max_depth = int(input("Enter the number of levels to follow: "))
-    download_images(website_url, max_depth=max_depth)
+    asyncio.run(download_images_async(website_url, max_depth=max_depth))
