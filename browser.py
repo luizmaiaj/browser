@@ -31,28 +31,28 @@ async def fetch_url(session, url):
         return await response.text()
 
 async def process_url(session, url, depth, max_depth, image_info):
-    if url in visited_urls or depth > max_depth:
-        return []
+    async with lock:
+        if url in visited_urls or depth > max_depth:
+            return [], []
+        visited_urls.add(url)
 
     print(f"Processing page: {url} at depth {depth}")
     try:
         html = await fetch_url(session, url)
         soup = BeautifulSoup(html, 'html.parser')
-        async with lock:
-            visited_urls.add(url)
 
         new_img_urls = set()
-        for img in soup.find_all('img'):
-            img_url = urljoin(url, img.get('src'))
-            async with lock:
+        async with lock:
+            for img in soup.find_all('img'):
+                img_url = urljoin(url, img.get('src'))
                 if img_url not in img_urls and img_url not in image_info:
                     new_img_urls.add(img_url)
                     img_urls.add(img_url)
 
         new_urls = []
-        for link in soup.find_all('a'):
-            next_page_url = urljoin(url, link.get('href')).rstrip('/')
-            async with lock:
+        async with lock:
+            for link in soup.find_all('a'):
+                next_page_url = urljoin(url, link.get('href')).rstrip('/')
                 if next_page_url not in visited_urls:
                     new_urls.append((next_page_url, depth + 1))
 
