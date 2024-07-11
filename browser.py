@@ -3,9 +3,12 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from collections import deque
-from PIL import Image
+from PIL import Image, ImageFile
 from io import BytesIO
 import hashlib
+
+# Ensure truncated images are handled properly
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 def download_images(url, folder_name='downloaded_images', max_depth=1):
     if not os.path.exists(folder_name):
@@ -48,7 +51,7 @@ def is_image_downloaded(img_url, folder_name, image_hashes):
         img_response = requests.get(img_url, headers={'Range': 'bytes=0-10240'}, stream=True)
         img_response.raise_for_status()
         img = Image.open(BytesIO(img_response.content))
-        img_hash = calculate_image_hash(img)
+        img_hash = calculate_image_hash(img_response.content)
 
         if img_hash in image_hashes:
             print(f"Image already downloaded (hash match): {img_url}")
@@ -63,7 +66,7 @@ def download_image(img_url, folder_name, image_hashes):
         img_response = requests.get(img_url)
         img_response.raise_for_status()
         img = Image.open(BytesIO(img_response.content))
-        img_hash = calculate_image_hash(img)
+        img_hash = calculate_image_hash(img_response.content)
         
         img_name = os.path.join(folder_name, f"{img_hash}.jpg")
 
@@ -71,17 +74,16 @@ def download_image(img_url, folder_name, image_hashes):
             print(f"Already downloaded: {img_name}")
             return
 
-        img.save(img_name)
+        with open(img_name, 'wb') as img_file:
+            img_file.write(img_response.content)
+            print(f"Downloaded {img_name}")
         image_hashes.add(img_hash)
-        print(f"Downloaded {img_name}")
     except (requests.HTTPError, IOError, Image.UnidentifiedImageError) as e:
         print(f"Failed to download image at URL: {img_url}, error: {e}")
 
-def calculate_image_hash(img):
+def calculate_image_hash(img_bytes):
     hash_md5 = hashlib.md5()
-    with BytesIO() as img_bytes:
-        img.save(img_bytes, format='JPEG')
-        hash_md5.update(img_bytes.getvalue())
+    hash_md5.update(img_bytes)
     return hash_md5.hexdigest()
 
 # Usage
