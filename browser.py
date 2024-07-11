@@ -36,7 +36,7 @@ async def fetch_url(session, url):
     async with session.get(url) as response:
         return await response.text()
 
-async def process_url(session, url, depth, max_depth):
+async def process_url(session, url, depth, max_depth, image_info):
     if url in visited_urls or depth > max_depth:
         return []
 
@@ -51,7 +51,7 @@ async def process_url(session, url, depth, max_depth):
         for img in soup.find_all('img'):
             img_url = urljoin(url, img.get('src'))
             with lock:
-                if img_url not in img_urls:
+                if img_url not in img_urls and img_url not in image_info:
                     new_img_urls.add(img_url)
                     img_urls.add(img_url)
 
@@ -102,7 +102,7 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
     image_info = load_image_info()
     
     async with aiohttp.ClientSession() as session:
-        tasks = [process_url(session, url, 0, max_depth)]
+        tasks = [process_url(session, url, 0, max_depth, image_info)]
         img_download_tasks = []
 
         while tasks:
@@ -116,8 +116,7 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
                 
                 new_img_urls, new_urls = result
                 img_download_tasks.extend([download_image(session, img_url, folder_name, image_info) for img_url in new_img_urls])
-                new_tasks.extend([process_url(session, new_url, new_depth, max_depth) for new_url, new_depth in new_urls if new_depth <= max_depth])
-
+                new_tasks.extend([process_url(session, new_url, new_depth, max_depth, image_info) for new_url, new_depth in new_urls if new_depth <= max_depth])
             tasks = new_tasks[:max_workers]  # Limit concurrent tasks
             
             # Process image downloads
