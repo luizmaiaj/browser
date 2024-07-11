@@ -4,20 +4,20 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from collections import deque
 
-def download_images(url, folder_name='downloaded_images', num_pages=1):
+def download_images(url, folder_name='downloaded_images', max_depth=1):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
     visited_urls = set()
     image_urls = set()
-    url_queue = deque([url.rstrip('/')])
+    url_queue = deque([(url.rstrip('/'), 0)])
 
-    while url_queue and num_pages > 0:
-        current_url = url_queue.popleft().rstrip('/')
-        if current_url in visited_urls:
+    while url_queue:
+        current_url, depth = url_queue.popleft()
+        if current_url in visited_urls or depth > max_depth:
             continue
 
-        print(f"Processing page: {current_url}")
+        print(f"Processing page: {current_url} at depth {depth}")
         response = requests.get(current_url)
         soup = BeautifulSoup(response.content, 'html.parser')
         visited_urls.add(current_url)
@@ -36,9 +36,7 @@ def download_images(url, folder_name='downloaded_images', num_pages=1):
                 next_page_url = link_tag.get('href').rstrip('/')
                 next_page_url = urljoin(current_url, next_page_url)
                 if next_page_url not in visited_urls:
-                    url_queue.append(next_page_url)
-
-        num_pages -= 1
+                    url_queue.append((next_page_url, depth + 1))
 
     print("All images have been downloaded.")
 
@@ -56,5 +54,5 @@ def download_image(img_url, folder_name):
 # Usage
 if __name__ == "__main__":
     website_url = input("Enter the website URL: ")
-    num_pages = int(input("Enter the number of pages to follow: "))
-    download_images(website_url, num_pages=num_pages)
+    max_depth = int(input("Enter the number of levels to follow: "))
+    download_images(website_url, max_depth=max_depth)
