@@ -8,6 +8,7 @@ from io import BytesIO
 import hashlib
 import json
 import numpy as np
+import concurrent.futures
 
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -24,7 +25,7 @@ def save_image_info(image_info):
     with open(IMAGE_INFO_FILE, 'w') as f:
         json.dump(image_info, f)
 
-def download_images(url, folder_name='downloaded_images', max_depth=1):
+def download_images(url, folder_name='downloaded_images', max_depth=1, max_workers=10):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
@@ -32,6 +33,7 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
 
     visited_urls = set()
     url_queue = deque([(url.rstrip('/'), 0)])
+    img_urls = set()
 
     while url_queue:
         current_url, depth = url_queue.popleft()
@@ -47,10 +49,8 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
         for img in img_tags:
             img_url = img.get('src')
             img_url = urljoin(current_url, img_url)
-            if img_url not in image_info:
-                download_image(img_url, folder_name, image_info)
-            else:
-                print(f"Image already downloaded: {img_url}")
+            if img_url not in image_info and img_url not in img_urls:
+                img_urls.add(img_url)
 
             # Get page links from image tags if available
             link_tag = img.parent if img.parent.name == 'a' else None
@@ -59,6 +59,15 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
                 next_page_url = urljoin(current_url, next_page_url)
                 if next_page_url not in visited_urls:
                     url_queue.append((next_page_url, depth + 1))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_url = {executor.submit(download_image, img_url, folder_name, image_info): img_url for img_url in img_urls}
+        for future in concurrent.futures.as_completed(future_to_url):
+            img_url = future_to_url[future]
+            try:
+                future.result()
+            except Exception as exc:
+                print(f"{img_url} generated an exception: {exc}")
 
     save_image_info(image_info)
     print("All images have been downloaded.")
