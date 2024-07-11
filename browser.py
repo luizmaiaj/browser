@@ -3,6 +3,8 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from collections import deque
+from PIL import Image
+from io import BytesIO
 
 def download_images(url, folder_name='downloaded_images', max_depth=1):
     if not os.path.exists(folder_name):
@@ -42,14 +44,35 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
 
 def download_image(img_url, folder_name):
     img_name = os.path.join(folder_name, os.path.basename(urlparse(img_url).path))
-    if os.path.exists(img_name):
-        print(f"Already downloaded: {img_name}")
+    hd_img_name = append_hd_to_filename(img_name)
+
+    if os.path.exists(hd_img_name):
+        print(f"Already downloaded: {hd_img_name}")
         return
 
     img_response = requests.get(img_url)
-    with open(img_name, 'wb') as img_file:
-        img_file.write(img_response.content)
-        print(f"Downloaded {img_name}")
+    try:
+        img = Image.open(BytesIO(img_response.content))
+        img_size = img.size
+    except (IOError, Image.UnidentifiedImageError):
+        print(f"Failed to identify image at URL: {img_url}")
+        return
+
+    if os.path.exists(img_name):
+        existing_img = Image.open(img_name)
+        existing_img_size = existing_img.size
+        if img_size > existing_img_size:
+            img_name = hd_img_name
+        else:
+            print(f"Already downloaded: {img_name}")
+            return
+
+    img.save(img_name)
+    print(f"Downloaded {img_name}")
+
+def append_hd_to_filename(file_path):
+    file_name, file_ext = os.path.splitext(file_path)
+    return f"{file_name}_hd{file_ext}"
 
 # Usage
 if __name__ == "__main__":
