@@ -5,13 +5,14 @@ from urllib.parse import urljoin, urlparse
 from collections import deque
 from PIL import Image
 from io import BytesIO
+import hashlib
 
 def download_images(url, folder_name='downloaded_images', max_depth=1):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
 
     visited_urls = set()
-    image_urls = set()
+    image_hashes = set()
     url_queue = deque([(url.rstrip('/'), 0)])
 
     while url_queue:
@@ -28,9 +29,8 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
         for img in img_tags:
             img_url = img.get('src')
             img_url = urljoin(current_url, img_url)
-            if img_url not in image_urls:
-                download_image_if_needed(img_url, folder_name)
-                image_urls.add(img_url)
+            if not is_image_downloaded(img_url, folder_name, image_hashes):
+                download_image(img_url, folder_name, image_hashes)
 
             # Get page links from image tags if available
             link_tag = img.parent if img.parent.name == 'a' else None
@@ -42,42 +42,47 @@ def download_images(url, folder_name='downloaded_images', max_depth=1):
 
     print("All images have been downloaded.")
 
-def download_image_if_needed(img_url, folder_name):
-    img_name = os.path.join(folder_name, os.path.basename(urlparse(img_url).path))
-    hd_img_name = append_hd_to_filename(img_name)
-
-    if os.path.exists(hd_img_name):
-        print(f"Already downloaded: {hd_img_name}")
-        return
-
+def is_image_downloaded(img_url, folder_name, image_hashes):
+    # Download initial bytes to inspect the image
     try:
-        # Check the image resolution by downloading only the first few KBs
         img_response = requests.get(img_url, headers={'Range': 'bytes=0-10240'}, stream=True)
         img_response.raise_for_status()
         img = Image.open(BytesIO(img_response.content))
-        img_size = img.size
+        img_hash = calculate_image_hash(img)
+
+        if img_hash in image_hashes:
+            print(f"Image already downloaded (hash match): {img_url}")
+            return True
+        return False
     except (requests.HTTPError, IOError, Image.UnidentifiedImageError) as e:
         print(f"Failed to identify image at URL: {img_url}, error: {e}")
-        return
+        return True
 
-    if os.path.exists(img_name):
-        existing_img = Image.open(img_name)
-        existing_img_size = existing_img.size
-        if img_size > existing_img_size:
-            img_name = hd_img_name
-        else:
+def download_image(img_url, folder_name, image_hashes):
+    try:
+        img_response = requests.get(img_url)
+        img_response.raise_for_status()
+        img = Image.open(BytesIO(img_response.content))
+        img_hash = calculate_image_hash(img)
+        
+        img_name = os.path.join(folder_name, f"{img_hash}.jpg")
+
+        if os.path.exists(img_name):
             print(f"Already downloaded: {img_name}")
             return
 
-    # Download the full image
-    img_response = requests.get(img_url)
-    with open(img_name, 'wb') as img_file:
-        img_file.write(img_response.content)
+        img.save(img_name)
+        image_hashes.add(img_hash)
         print(f"Downloaded {img_name}")
+    except (requests.HTTPError, IOError, Image.UnidentifiedImageError) as e:
+        print(f"Failed to download image at URL: {img_url}, error: {e}")
 
-def append_hd_to_filename(file_path):
-    file_name, file_ext = os.path.splitext(file_path)
-    return f"{file_name}_hd{file_ext}"
+def calculate_image_hash(img):
+    hash_md5 = hashlib.md5()
+    with BytesIO() as img_bytes:
+        img.save(img_bytes, format='JPEG')
+        hash_md5.update(img_bytes.getvalue())
+    return hash_md5.hexdigest()
 
 # Usage
 if __name__ == "__main__":
