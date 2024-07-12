@@ -91,7 +91,7 @@ async def download_image(session, img_url, folder_name, image_info):
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
 
-def list_files_in_nas_photos_library(nas_ip, nas_username, nas_password):
+def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder):
     conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
     assert conn.connect(nas_ip, 139)
     
@@ -102,11 +102,28 @@ def list_files_in_nas_photos_library(nas_ip, nas_username, nas_password):
         if not share.isSpecial and share.name not in ['NETLOGON', 'SYSVOL']:
             print(f"- {share.name}")
     
-    # List files in the Photos library
-    print("\nFiles in Photos Library:")
-    shared_files = conn.listPath('home', '/Photos/PhotoLibrary')
-    for shared_file in shared_files:
-        print(shared_file.filename)
+    # List folders in the Photos library
+    print("\nFolders in Photos Library:")
+    photos_folders = conn.listPath('home', '/Photos/PhotoLibrary')
+    for folder in photos_folders:
+        if folder.isDirectory and folder.filename not in ['.', '..']:
+            print(f"- {folder.filename}")
+    
+    # Ask the user for the name of the new folder
+    new_folder_name = input("\nEnter the name of the new folder to create in the Photos Library: ")
+    new_folder_path = f"/Photos/PhotoLibrary/{new_folder_name}"
+    
+    # Create the new folder on the NAS
+    conn.createDirectory('home', new_folder_path)
+    
+    # Copy files to the new folder
+    for filename in os.listdir(local_folder):
+        local_file_path = os.path.join(local_folder, filename)
+        if os.path.isfile(local_file_path):
+            with open(local_file_path, 'rb') as file_obj:
+                file_bytes = file_obj.read()
+                conn.storeFile('home', f"{new_folder_path}/{filename}", BytesIO(file_bytes))
+                print(f"Copied {filename} to {new_folder_name}")
     
     conn.close()
 
@@ -170,4 +187,4 @@ if __name__ == "__main__":
     nas_username = "luizmaiaj"
     # nas_password = input("Enter the NAS password: ")
     nas_password = "nacpy3-pyqbaG-dovkax"
-    list_files_in_nas_photos_library(nas_ip, nas_username, nas_password)
+    list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, 'downloaded_images')
