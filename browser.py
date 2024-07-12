@@ -92,6 +92,16 @@ def calculate_image_hash(img_bytes):
 async def download_images_async(url, folder_name='downloaded_images', max_depth=1, max_workers=50):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
+    else:
+        create_new_folder = input(f"Folder '{folder_name}' already exists. Create a new folder? (yes/no): ")
+        if create_new_folder.lower() == 'yes':
+            suffix = 1
+            new_folder_name = f"{folder_name}_{suffix:02d}"
+            while os.path.exists(new_folder_name):
+                suffix += 1
+                new_folder_name = f"{folder_name}_{suffix:02d}"
+            folder_name = new_folder_name
+            os.makedirs(folder_name)
 
     image_info = load_image_info()
     
