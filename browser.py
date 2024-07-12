@@ -9,6 +9,10 @@ import json
 import aiohttp
 import asyncio
 from smb.SMBConnection import SMBConnection
+import validators
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
 
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -218,42 +222,91 @@ async def download_images_from_file(urls):
             print(f"Starting download for {url} into folder {folder_name} with depth {depth}")
             await download_images_async(url, folder_name=folder_name, max_depth=depth)
 
-# Usage
-if __name__ == "__main__":
+def is_valid_folder_name(folder_name):
+    # Placeholder for actual folder name validation
+    return bool(folder_name and folder_name.strip())
 
-    max_depth = 0
+def get_user_input():
     choice = 'new'
-
     urls = load_url_list()
+    
     if urls:
         print("Available URLs and corresponding folders:")
         for idx, (url, folder, depth) in enumerate(urls, start=1):
             print(f"{idx}. URL: {url}, Folder: {folder}, Depth: {depth}")
 
-        choice = input("Do you want to fetch images from the URLs in the file or type a new URL? (file/new): ").strip().lower()
+        while True:
+            choice = input("Do you want to fetch images from the URLs in the file or type a new URL? (file/new): ").strip().lower()
+            if choice in ['file', 'new', '']:
+                if choice == '':
+                    choice = 'new'
+                break
+            print("Invalid input. Please enter 'file' or 'new'.")
+        
+        print(f"Source: {choice}.")
 
     if choice == 'new':
-        website_url = input("Enter the website URL: ")
-        folder_name = input("Enter the folder name to download the images to: ")
+        while True:
+            website_url = input("Enter the website URL: ").strip()
+            if validators.url(website_url):
+                break
+            print("Invalid URL. Please enter a valid website URL.")
+        
+        print(f"URL: {website_url}.")
+
+        while True:
+            folder_name = input("Enter the folder name to download the images to: ").strip()
+            if is_valid_folder_name(folder_name):
+                break
+            print("Invalid folder name. Please enter a valid folder name.")
+        
+        print(f"Folder: {folder_name}.")
+
         try:
-            max_depth = int(input("Enter the number of levels to follow: "))
+            max_depth = int(input("Enter the depth to follow: ").strip())
         except ValueError:
             max_depth = 0
 
+        print(f"Depth: {max_depth}.")
+
         urls = [[website_url, folder_name, max_depth]]
 
-    # Ask the user if images under 10k bytes should be deleted
-    delete_small_images = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower() == 'yes'
+    while True:
+        delete_small_images_input = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower()
+        if delete_small_images_input in ['yes', 'no', 'y', 'n', '']:
+            if delete_small_images_input == '' or delete_small_images_input == 'n':
+                delete_small_images = False
+            else:
+                delete_small_images = delete_small_images_input in ['yes', 'y']
+            break
+        print("Invalid input. Please answer with yes, no, y, or n.")
+    
+    print(f"Delete small images: {delete_small_images_input}.")
 
-    # Ask the user if images under 10k bytes should be deleted
-    move_files = input("Do you want to move images or copy? (move/copy): ").strip().lower() == 'move'
+    while True:
+        move_files_input = input("Do you want to move images or copy? (move/copy): ").strip().lower()
+        if move_files_input in ['move', 'copy', '']:
+            if move_files_input == '':
+                move_files = False
+            else:
+                move_files = move_files_input == 'move'
+            break
+        print("Invalid input. Please answer with move or copy.")
+    
+    print(f"Move images: {move_files}.")
+
+    return urls, delete_small_images, move_files
+
+if __name__ == "__main__":
+    urls, delete_small_images, move_files = get_user_input()
 
     if urls:
         asyncio.run(download_images_from_file(urls))
 
-        # List files in the NAS photos library
-        nas_ip = "192.168.1.56"
-        nas_username = "luizmaiaj"
-        nas_password = "nacpy3-pyqbaG-dovkax"
+        nas_ip = os.getenv('NAS_IP')
+        nas_username = os.getenv('NAS_USERNAME')
+        nas_password = os.getenv('NAS_PASSWORD')
+
+        # copy files to the NAS
         for url, folder_name, depth in urls:
-            list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images, move_files)   
+            list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images, move_files)
