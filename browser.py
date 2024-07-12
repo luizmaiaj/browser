@@ -13,13 +13,13 @@ from dotenv import find_dotenv, load_dotenv
 from PIL import Image, ImageFile
 from smb.SMBConnection import SMBConnection
 
-load_dotenv(find_dotenv())
+load_dotenv(find_dotenv(raise_error_if_not_found=True))
 
 NAS_IP = os.getenv('NAS_IP')
 NAS_USERNAME = os.getenv('NAS_USERNAME')
 NAS_PASSWORD = os.getenv('NAS_PASSWORD')
-DEFAULT_MAX_DEPTH = os.getenv('DEFAULT_MAX_DEPTH')
-DEFAULT_NUMBER_OF_WORKERS = os.getenv('DEFAULT_NUMBER_OF_WORKERS')
+DEFAULT_MAX_DEPTH = int(os.getenv('DEFAULT_MAX_DEPTH'))
+DEFAULT_NUMBER_OF_WORKERS = int(os.getenv('DEFAULT_NUMBER_OF_WORKERS'))
 IMAGE_INFO_FILE = os.getenv('IMAGE_INFO_FILE')
 URL_LIST_FILE = os.getenv('URL_LIST_FILE')
 
