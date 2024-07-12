@@ -95,7 +95,7 @@ async def download_image(session, img_url, folder_name, image_info):
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
 
-def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder, nas_folder_name):
+def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder, nas_folder_name, delete_small_images):
     conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
     assert conn.connect(nas_ip, 139)
 
@@ -109,7 +109,6 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
             folder_names.append(folder.filename)
 
     # Check if the specified folder already exists, if not, create it
-    new_folder_path = ""
     if nas_folder_name not in folder_names:
         new_folder_path = f"/Photos/PhotoLibrary/{nas_folder_name}"
         conn.createDirectory('home', new_folder_path)
@@ -118,9 +117,6 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
 
     # retrieving the list of existing files
     existing_files = conn.listPath('home', new_folder_path)
-
-    # Ask the user if images under 10k bytes should be deleted
-    delete_small_images = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower() == 'yes'
 
     # Copy files to the selected or new folder, skipping existing files
     for filename in os.listdir(local_folder):
@@ -199,8 +195,15 @@ def load_url_list():
     if os.path.exists(URL_LIST_FILE):
         with open(URL_LIST_FILE, 'r') as f:
             reader = csv.reader(f, delimiter=';')
+            next(reader)  # Skip the header
             return [(row[0], row[1]) for row in reader if row]
     return []
+
+async def download_images_from_file(urls, max_depth):
+    async with aiohttp.ClientSession() as session:
+        for url, folder_name in urls:
+            print(f"Starting download for {url} into folder {folder_name}")
+            await download_images_async(url, folder_name=folder_name, max_depth=max_depth)
 
 # Usage
 if __name__ == "__main__":
@@ -211,20 +214,25 @@ if __name__ == "__main__":
             print(f"{idx}. URL: {url}, Folder: {folder}")
         choice = input("Do you want to fetch images from the URLs in the file or type a new URL? (file/new): ").strip().lower()
         if choice == 'file':
-            url_choice = int(input("Enter the number of the URL you want to fetch images from: "))
-            website_url, folder_name = urls[url_choice - 1]
+            max_depth = int(input("Enter the number of levels to follow: "))
+            asyncio.run(download_images_from_file(urls, max_depth))
         else:
             website_url = input("Enter the website URL: ")
             folder_name = input("Enter the folder name to download the images to: ")
+            max_depth = int(input("Enter the number of levels to follow: "))
+            asyncio.run(download_images_async(website_url, folder_name=folder_name, max_depth=max_depth))
     else:
         website_url = input("Enter the website URL: ")
         folder_name = input("Enter the folder name to download the images to: ")
-    
-    max_depth = int(input("Enter the number of levels to follow: "))
-    asyncio.run(download_images_async(website_url, folder_name=folder_name, max_depth=max_depth))
-    
+        max_depth = int(input("Enter the number of levels to follow: "))
+        asyncio.run(download_images_async(website_url, folder_name=folder_name, max_depth=max_depth))
+
+    # Ask the user if images under 10k bytes should be deleted
+    delete_small_images = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower() == 'yes'
+
     # List files in the NAS photos library
     nas_ip = "192.168.1.56"
     nas_username = "luizmaiaj"
     nas_password = "nacpy3-pyqbaG-dovkax"
-    list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name)
+    for url, folder_name in urls:
+        list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images)
