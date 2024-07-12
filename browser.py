@@ -1,16 +1,17 @@
-import os
+import asyncio
 import csv
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
-from PIL import Image, ImageFile
-from io import BytesIO
 import hashlib
 import json
+import os
+from io import BytesIO
+from urllib.parse import urljoin, urlparse
+
 import aiohttp
-import asyncio
-from smb.SMBConnection import SMBConnection
 import validators
-from dotenv import load_dotenv, find_dotenv
+from bs4 import BeautifulSoup
+from dotenv import find_dotenv, load_dotenv
+from PIL import Image, ImageFile
+from smb.SMBConnection import SMBConnection
 
 load_dotenv(find_dotenv())
 
