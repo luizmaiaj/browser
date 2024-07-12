@@ -127,13 +127,15 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
         new_folder_path = f"/Photos/PhotoLibrary/{new_folder_name}"
         conn.createDirectory('home', new_folder_path)
     
+    # retrieving the list of existing files
+    existing_files = conn.listPath('home', new_folder_path)
+
     # Copy files to the selected or new folder, skipping existing files
     for filename in os.listdir(local_folder):
         local_file_path = os.path.join(local_folder, filename)
         if os.path.isfile(local_file_path):
             remote_file_path = f"{new_folder_path}/{filename}"
             try:
-                existing_files = conn.listPath('home', new_folder_path)
                 existing_filenames = [file.filename for file in existing_files]
                 if filename in existing_filenames:
                     print(f"File {filename} already exists in {new_folder_name}. Skipping.")
