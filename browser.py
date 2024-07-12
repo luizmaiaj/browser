@@ -14,13 +14,17 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv())
 
+NAS_IP = os.getenv('NAS_IP')
+NAS_USERNAME = os.getenv('NAS_USERNAME')
+NAS_PASSWORD = os.getenv('NAS_PASSWORD')
+DEFAULT_MAX_DEPTH = os.getenv('DEFAULT_MAX_DEPTH')
+DEFAULT_NUMBER_OF_WORKERS = os.getenv('DEFAULT_NUMBER_OF_WORKERS')
+IMAGE_INFO_FILE = os.getenv('IMAGE_INFO_FILE')
+URL_LIST_FILE = os.getenv('URL_LIST_FILE')
+
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-DEFAULT_MAX_DEPTH = 0
-DEFAULT_NUMBER_OF_WORKERS = 50
 
-IMAGE_INFO_FILE = 'image_info.json'
-URL_LIST_FILE = 'url_list.csv'
 visited_urls = set()
 img_urls = set()
 lock = asyncio.Lock()
@@ -281,7 +285,7 @@ def get_user_input():
             break
         print("Invalid input. Please answer with yes, no, y, or n.")
     
-    print(f"Delete small images: {delete_small_images_input}.")
+    print(f"Delete small images: {delete_small_images}.")
 
     while True:
         move_files_input = input("Do you want to move images or copy? (move/copy): ").strip().lower()
@@ -303,10 +307,6 @@ if __name__ == "__main__":
     if urls:
         asyncio.run(download_images_from_file(urls))
 
-        nas_ip = os.getenv('NAS_IP')
-        nas_username = os.getenv('NAS_USERNAME')
-        nas_password = os.getenv('NAS_PASSWORD')
-
         # copy files to the NAS
         for url, folder_name, depth in urls:
-            list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images, move_files)
+            list_and_copy_files_to_nas_photos_library(NAS_IP, NAS_USERNAME, NAS_PASSWORD, folder_name, folder_name, delete_small_images, move_files)
