@@ -7,6 +7,7 @@ import hashlib
 import json
 import aiohttp
 import asyncio
+from smb.SMBConnection import SMBConnection
 
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
@@ -83,11 +84,31 @@ async def download_image(session, img_url, folder_name, image_info):
             img_file.write(img_content)
             print(f"Downloaded {img_name}")
         image_info[img_url] = {'hash': img_hash, 'filename': img_name}
+
     except Exception as e:
         print(f"Failed to download image at URL: {img_url}, error: {e}")
 
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
+
+def list_files_in_nas_photos_library(nas_ip, nas_username, nas_password):
+    conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
+    assert conn.connect(nas_ip, 139)
+    
+    # List shared folders
+    shared_folders = conn.listShares()
+    print("Shared Folders:")
+    for share in shared_folders:
+        if not share.isSpecial and share.name not in ['NETLOGON', 'SYSVOL']:
+            print(f"- {share.name}")
+    
+    # List files in the Photos library
+    print("\nFiles in Photos Library:")
+    shared_files = conn.listPath('home', '/Photos/PhotoLibrary')
+    for shared_file in shared_files:
+        print(shared_file.filename)
+    
+    conn.close()
 
 async def download_images_async(url, folder_name='downloaded_images', max_depth=1, max_workers=50):
     if not os.path.exists(folder_name):
@@ -141,3 +162,12 @@ if __name__ == "__main__":
     website_url = input("Enter the website URL: ")
     max_depth = int(input("Enter the number of levels to follow: "))
     asyncio.run(download_images_async(website_url, max_depth=max_depth))
+    
+    # List files in the NAS photos library
+    # nas_ip = input("Enter the NAS IP address: ")
+    nas_ip = "192.168.1.56"
+    # nas_username = input("Enter the NAS username: ")
+    nas_username = "luizmaiaj"
+    # nas_password = input("Enter the NAS password: ")
+    nas_password = "nacpy3-pyqbaG-dovkax"
+    list_files_in_nas_photos_library(nas_ip, nas_username, nas_password)
