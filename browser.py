@@ -1,4 +1,5 @@
 import os
+import csv
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from PIL import Image, ImageFile
@@ -15,6 +16,7 @@ DEFAULT_MAX_DEPTH = 0
 DEFAULT_NUMBER_OF_WORKERS = 50
 
 IMAGE_INFO_FILE = 'image_info.json'
+URL_LIST_FILE = 'url_list.csv'
 visited_urls = set()
 img_urls = set()
 lock = asyncio.Lock()
@@ -93,7 +95,7 @@ async def download_image(session, img_url, folder_name, image_info):
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
 
-def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder):
+def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder, nas_folder_name):
     conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
     assert conn.connect(nas_ip, 139)
 
@@ -106,22 +108,14 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
             print(f"- {folder.filename}")
             folder_names.append(folder.filename)
 
-    # Ask the user to select an existing folder or create a new one
-    new_folder_name = ""
+    # Check if the specified folder already exists, if not, create it
     new_folder_path = ""
-    use_existing = input("Do you want to use an existing folder? (yes/no): ").strip().lower()
-    if use_existing == 'yes':
-        selected_folder = input("Enter the name of the existing folder: ").strip()
-        if selected_folder not in folder_names:
-            print("Folder not found. Exiting.")
-            return
-        new_folder_name = selected_folder
-        new_folder_path = f"/Photos/PhotoLibrary/{selected_folder}"
-    else:
-        new_folder_name = input("Enter the name of the new folder to create in the Photos Library: ").strip()
-        new_folder_path = f"/Photos/PhotoLibrary/{new_folder_name}"
+    if nas_folder_name not in folder_names:
+        new_folder_path = f"/Photos/PhotoLibrary/{nas_folder_name}"
         conn.createDirectory('home', new_folder_path)
-    
+    else:
+        new_folder_path = f"/Photos/PhotoLibrary/{nas_folder_name}"
+
     # retrieving the list of existing files
     existing_files = conn.listPath('home', new_folder_path)
 
@@ -141,7 +135,7 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
             try:
                 existing_filenames = [file.filename for file in existing_files]
                 if filename in existing_filenames:
-                    print(f"File {filename} already exists in {new_folder_name}. Skipping.")
+                    print(f"File {filename} already exists in {nas_folder_name}. Skipping.")
                     continue
             except Exception as e:
                 print(f"Error checking existing files: {e}")
@@ -150,7 +144,7 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
             with open(local_file_path, 'rb') as file_obj:
                 file_bytes = file_obj.read()
                 conn.storeFile('home', remote_file_path, BytesIO(file_bytes))
-                print(f"Copied {filename} to {new_folder_name}")
+                print(f"Copied {filename} to {nas_folder_name}")
     
     conn.close()
 
@@ -201,17 +195,36 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
     save_image_info(image_info)
     print("All images have been downloaded.")
 
+def load_url_list():
+    if os.path.exists(URL_LIST_FILE):
+        with open(URL_LIST_FILE, 'r') as f:
+            reader = csv.reader(f, delimiter=';')
+            return [(row[0], row[1]) for row in reader if row]
+    return []
+
 # Usage
 if __name__ == "__main__":
-    website_url = input("Enter the website URL: ")
+    urls = load_url_list()
+    if urls:
+        print("Available URLs and corresponding folders:")
+        for idx, (url, folder) in enumerate(urls, start=1):
+            print(f"{idx}. URL: {url}, Folder: {folder}")
+        choice = input("Do you want to fetch images from the URLs in the file or type a new URL? (file/new): ").strip().lower()
+        if choice == 'file':
+            url_choice = int(input("Enter the number of the URL you want to fetch images from: "))
+            website_url, folder_name = urls[url_choice - 1]
+        else:
+            website_url = input("Enter the website URL: ")
+            folder_name = input("Enter the folder name to download the images to: ")
+    else:
+        website_url = input("Enter the website URL: ")
+        folder_name = input("Enter the folder name to download the images to: ")
+    
     max_depth = int(input("Enter the number of levels to follow: "))
-    asyncio.run(download_images_async(website_url, max_depth=max_depth))
+    asyncio.run(download_images_async(website_url, folder_name=folder_name, max_depth=max_depth))
     
     # List files in the NAS photos library
-    # nas_ip = input("Enter the NAS IP address: ")
     nas_ip = "192.168.1.56"
-    # nas_username = input("Enter the NAS username: ")
     nas_username = "luizmaiaj"
-    # nas_password = input("Enter the NAS password: ")
     nas_password = "nacpy3-pyqbaG-dovkax"
-    list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, 'downloaded_images')
+    list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name)
