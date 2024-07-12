@@ -196,26 +196,25 @@ def load_url_list():
         with open(URL_LIST_FILE, 'r') as f:
             reader = csv.reader(f, delimiter=';')
             next(reader)  # Skip the header
-            return [(row[0], row[1]) for row in reader if row]
+            return [(row[0], row[1], int(row[2])) for row in reader if row]
     return []
 
-async def download_images_from_file(urls, max_depth):
+async def download_images_from_file(urls):
     async with aiohttp.ClientSession() as session:
-        for url, folder_name in urls:
-            print(f"Starting download for {url} into folder {folder_name}")
-            await download_images_async(url, folder_name=folder_name, max_depth=max_depth)
+        for url, folder_name, depth in urls:
+            print(f"Starting download for {url} into folder {folder_name} with depth {depth}")
+            await download_images_async(url, folder_name=folder_name, max_depth=depth)
 
 # Usage
 if __name__ == "__main__":
     urls = load_url_list()
     if urls:
         print("Available URLs and corresponding folders:")
-        for idx, (url, folder) in enumerate(urls, start=1):
-            print(f"{idx}. URL: {url}, Folder: {folder}")
+        for idx, (url, folder, depth) in enumerate(urls, start=1):
+            print(f"{idx}. URL: {url}, Folder: {folder}, Depth: {depth}")
         choice = input("Do you want to fetch images from the URLs in the file or type a new URL? (file/new): ").strip().lower()
         if choice == 'file':
-            max_depth = int(input("Enter the number of levels to follow: "))
-            asyncio.run(download_images_from_file(urls, max_depth))
+            asyncio.run(download_images_from_file(urls))
         else:
             website_url = input("Enter the website URL: ")
             folder_name = input("Enter the folder name to download the images to: ")
@@ -234,5 +233,5 @@ if __name__ == "__main__":
     nas_ip = "192.168.1.56"
     nas_username = "luizmaiaj"
     nas_password = "nacpy3-pyqbaG-dovkax"
-    for url, folder_name in urls:
-        list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images)
+    for url, folder_name, depth in urls:
+        list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images)   
