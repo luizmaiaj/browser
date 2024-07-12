@@ -96,33 +96,55 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
     assert conn.connect(nas_ip, 139)
     
     # List shared folders
-    shared_folders = conn.listShares()
-    print("Shared Folders:")
-    for share in shared_folders:
-        if not share.isSpecial and share.name not in ['NETLOGON', 'SYSVOL']:
-            print(f"- {share.name}")
+    # shared_folders = conn.listShares()
+    # print("Shared Folders:")
+    # for share in shared_folders:
+    #     if not share.isSpecial and share.name not in ['NETLOGON', 'SYSVOL']:
+    #         print(f"- {share.name}")
     
     # List folders in the Photos library
     print("\nFolders in Photos Library:")
     photos_folders = conn.listPath('home', '/Photos/PhotoLibrary')
+    folder_names = []
     for folder in photos_folders:
         if folder.isDirectory and folder.filename not in ['.', '..']:
             print(f"- {folder.filename}")
+            folder_names.append(folder.filename)
     
-    # Ask the user for the name of the new folder
-    new_folder_name = input("\nEnter the name of the new folder to create in the Photos Library: ")
-    new_folder_path = f"/Photos/PhotoLibrary/{new_folder_name}"
+    # Ask the user to select an existing folder or create a new one
+    new_folder_name = ""
+    new_folder_path = ""
+    use_existing = input("Do you want to use an existing folder? (yes/no): ").strip().lower()
+    if use_existing == 'yes':
+        selected_folder = input("Enter the name of the existing folder: ").strip()
+        if selected_folder not in folder_names:
+            print("Folder not found. Exiting.")
+            return
+        new_folder_name = selected_folder
+        new_folder_path = f"/Photos/PhotoLibrary/{selected_folder}"
+    else:
+        new_folder_name = input("Enter the name of the new folder to create in the Photos Library: ").strip()
+        new_folder_path = f"/Photos/PhotoLibrary/{new_folder_name}"
+        conn.createDirectory('home', new_folder_path)
     
-    # Create the new folder on the NAS
-    conn.createDirectory('home', new_folder_path)
-    
-    # Copy files to the new folder
+    # Copy files to the selected or new folder, skipping existing files
     for filename in os.listdir(local_folder):
         local_file_path = os.path.join(local_folder, filename)
         if os.path.isfile(local_file_path):
+            remote_file_path = f"{new_folder_path}/{filename}"
+            try:
+                existing_files = conn.listPath('home', new_folder_path)
+                existing_filenames = [file.filename for file in existing_files]
+                if filename in existing_filenames:
+                    print(f"File {filename} already exists in {new_folder_name}. Skipping.")
+                    continue
+            except Exception as e:
+                print(f"Error checking existing files: {e}")
+                continue
+            
             with open(local_file_path, 'rb') as file_obj:
                 file_bytes = file_obj.read()
-                conn.storeFile('home', f"{new_folder_path}/{filename}", BytesIO(file_bytes))
+                conn.storeFile('home', remote_file_path, BytesIO(file_bytes))
                 print(f"Copied {filename} to {new_folder_name}")
     
     conn.close()
