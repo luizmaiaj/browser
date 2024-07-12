@@ -95,7 +95,7 @@ async def download_image(session, img_url, folder_name, image_info):
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
 
-def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder, nas_folder_name, delete_small_images):
+def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder, nas_folder_name, delete_small_images, move_files=False):
     conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
     assert conn.connect(nas_ip, 139)
 
@@ -118,7 +118,7 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
     # retrieving the list of existing files
     existing_files = conn.listPath('home', new_folder_path)
 
-    # Copy files to the selected or new folder, skipping existing files
+    # Copy or move files to the selected or new folder, skipping existing files
     for filename in os.listdir(local_folder):
         local_file_path = os.path.join(local_folder, filename)
         if os.path.isfile(local_file_path):
@@ -140,8 +140,13 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
             with open(local_file_path, 'rb') as file_obj:
                 file_bytes = file_obj.read()
                 conn.storeFile('home', remote_file_path, BytesIO(file_bytes))
+
+            if move_files:
+                os.remove(local_file_path)
+                print(f"Moved {filename} to {nas_folder_name}")
+            else:
                 print(f"Copied {filename} to {nas_folder_name}")
-    
+
     conn.close()
 
 async def download_images_async(url, folder_name='downloaded_images', max_depth=DEFAULT_MAX_DEPTH, max_workers=DEFAULT_NUMBER_OF_WORKERS):
@@ -229,15 +234,18 @@ if __name__ == "__main__":
 
         urls = [[website_url, folder_name, max_depth]]
 
+    # Ask the user if images under 10k bytes should be deleted
+    delete_small_images = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower() == 'yes'
+
+    # Ask the user if images under 10k bytes should be deleted
+    move_files = input("Do you want to move images or copy? (move/copy): ").strip().lower() == 'move'
+
     if urls:
         asyncio.run(download_images_from_file(urls))
-
-        # Ask the user if images under 10k bytes should be deleted
-        delete_small_images = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower() == 'yes'
 
         # List files in the NAS photos library
         nas_ip = "192.168.1.56"
         nas_username = "luizmaiaj"
         nas_password = "nacpy3-pyqbaG-dovkax"
         for url, folder_name, depth in urls:
-            list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images)   
+            list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images, move_files)   
