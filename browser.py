@@ -207,31 +207,37 @@ async def download_images_from_file(urls):
 
 # Usage
 if __name__ == "__main__":
+
+    max_depth = 0
+    choice = 'new'
+
     urls = load_url_list()
     if urls:
         print("Available URLs and corresponding folders:")
         for idx, (url, folder, depth) in enumerate(urls, start=1):
             print(f"{idx}. URL: {url}, Folder: {folder}, Depth: {depth}")
+
         choice = input("Do you want to fetch images from the URLs in the file or type a new URL? (file/new): ").strip().lower()
-        if choice == 'file':
-            asyncio.run(download_images_from_file(urls))
-        else:
-            website_url = input("Enter the website URL: ")
-            folder_name = input("Enter the folder name to download the images to: ")
-            max_depth = int(input("Enter the number of levels to follow: "))
-            asyncio.run(download_images_async(website_url, folder_name=folder_name, max_depth=max_depth))
-    else:
+
+    if choice == 'new':
         website_url = input("Enter the website URL: ")
         folder_name = input("Enter the folder name to download the images to: ")
-        max_depth = int(input("Enter the number of levels to follow: "))
-        asyncio.run(download_images_async(website_url, folder_name=folder_name, max_depth=max_depth))
+        try:
+            max_depth = int(input("Enter the number of levels to follow: "))
+        except ValueError:
+            max_depth = 0
 
-    # Ask the user if images under 10k bytes should be deleted
-    delete_small_images = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower() == 'yes'
+        urls = [[website_url, folder_name, max_depth]]
 
-    # List files in the NAS photos library
-    nas_ip = "192.168.1.56"
-    nas_username = "luizmaiaj"
-    nas_password = "nacpy3-pyqbaG-dovkax"
-    for url, folder_name, depth in urls:
-        list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images)   
+    if urls:
+        asyncio.run(download_images_from_file(urls))
+
+        # Ask the user if images under 10k bytes should be deleted
+        delete_small_images = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower() == 'yes'
+
+        # List files in the NAS photos library
+        nas_ip = "192.168.1.56"
+        nas_username = "luizmaiaj"
+        nas_password = "nacpy3-pyqbaG-dovkax"
+        for url, folder_name, depth in urls:
+            list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, folder_name, folder_name, delete_small_images)   
