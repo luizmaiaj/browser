@@ -356,10 +356,31 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
 
         if delete_choice == 'yes':
             for dup_group in duplicates:
-                for idx, file_info in enumerate(dup_group):
-                    delete_duplicates(conn, 'home', dup_group, date_choice)
+                delete_duplicates(conn, 'home', dup_group, date_choice)
+    
+    # Ask the user if they want to delete files based on size
+    size_delete_choice = input("Do you want to delete files based on size? (yes/no): ").strip().lower()
+    if size_delete_choice == 'yes':
+        size_limit = int(input("Enter the size limit in bytes: ").strip())
+        delete_files_by_size(conn, 'home', image_data, size_limit)
 
     conn.close()
+
+def delete_files_by_size(conn, service_name, image_data, size_limit):
+    impacted_files = [file_info for file_info in image_data if file_info['size'] <= size_limit]
+    
+    if impacted_files:
+        print("The following files will be deleted based on the size limit:")
+        for file_info in impacted_files:
+            print(f"{file_info['path']} (Size: {file_info['size']} bytes)")
+        
+        confirm_delete = input("Do you want to proceed with deleting these files? (yes/no): ").strip().lower()
+        if confirm_delete == 'yes':
+            for file_info in impacted_files:
+                conn.deleteFiles(service_name, file_info['path'])
+                print(f"Deleted {file_info['path']} (Size: {file_info['size']} bytes)")
+    else:
+        print("No files meet the size criteria for deletion.")
 
 def calculate_file_hash(conn, service_name, file_path):
     file_obj = BytesIO()
