@@ -115,7 +115,7 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
     else:
         new_folder_path = f"/Photos/PhotoLibrary/{nas_folder_name}"
 
-    # retrieving the list of existing files
+    # Retrieving the list of existing files
     existing_files = conn.listPath('home', new_folder_path)
 
     # Copy or move files to the selected or new folder, skipping existing files
@@ -146,6 +146,14 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
                 print(f"Moved {filename} to {nas_folder_name}")
             else:
                 print(f"Copied {filename} to {nas_folder_name}")
+
+    if move_files:
+        # Remove the local folder after all files have been moved
+        try:
+            os.rmdir(local_folder)
+            print(f"Deleted local folder: {local_folder}")
+        except OSError as e:
+            print(f"Error deleting folder {local_folder}: {e}")
 
     conn.close()
 
