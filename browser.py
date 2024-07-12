@@ -3,6 +3,7 @@ import csv
 import hashlib
 import json
 import os
+from datetime import datetime
 from io import BytesIO
 from urllib.parse import urljoin, urlparse
 
@@ -302,12 +303,104 @@ def get_user_input():
 
     return urls, delete_small_images, move_files
 
+def cleanup_nas_images(nas_ip, nas_username, nas_password):
+    conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
+    assert conn.connect(nas_ip, 139)
+
+    nas_folder_path = '/Photos/PhotoLibrary'
+    image_data = []
+
+    def traverse_nas_folder(folder_path):
+        nas_files = conn.listPath('home', folder_path)
+        for file in nas_files:
+            if file.filename not in ['.', '..']:
+                file_path = f"{folder_path}/{file.filename}"
+
+                print(f"Processing file: {file_path}")
+
+                if file.isDirectory:
+                    traverse_nas_folder(file_path)
+                else:
+                    file_hash = calculate_file_hash(conn, 'home', file_path)
+                    print(f"Hash for file {file_path}: {file_hash}")
+                    image_data.append({
+                        'path': file_path,
+                        'hash': file_hash,
+                        'creation_date': file.create_time,
+                        'size': file.file_size
+                    })
+
+    choice = input("Do you want to load the latest nas_images.json or recalculate the hashes? (load/recalculate): ").strip().lower()
+    if choice == 'load' and os.path.exists('nas_images.json'):
+        with open('nas_images.json', 'r') as f:
+            image_data = json.load(f)
+        print("Loaded image data from nas_images.json.")
+    else:
+        print("Recalculating hashes...")
+        traverse_nas_folder(nas_folder_path)
+
+        with open('nas_images.json', 'w') as f:
+            json.dump(image_data, f, default=str)
+
+    duplicates = find_duplicates(image_data)
+    
+    if duplicates:
+        print("Duplicate files found:")
+        date_choice = input("Delete older or newer files? (older/newer): ").strip().lower()
+
+        for dup_group in duplicates:
+                for idx, file_info in enumerate(dup_group):
+                    print(f"{idx + 1}. {file_info['path']} (Created on {file_info['creation_date']}, Size: {file_info['size']} bytes)")
+
+        delete_choice = input("Do you want to delete the duplicates? (yes/no): ").strip().lower()
+
+        if delete_choice == 'yes':
+            for dup_group in duplicates:
+                for idx, file_info in enumerate(dup_group):
+                    delete_duplicates(conn, 'home', dup_group, date_choice)
+
+    conn.close()
+
+def calculate_file_hash(conn, service_name, file_path):
+    file_obj = BytesIO()
+    conn.retrieveFile(service_name, file_path, file_obj)
+    file_obj.seek(0)
+    return hashlib.md5(file_obj.read()).hexdigest()
+
+def find_duplicates(image_data):
+    hash_map = {}
+    for file_info in image_data:
+        file_hash = file_info['hash']
+        if file_hash in hash_map:
+            hash_map[file_hash].append(file_info)
+        else:
+            hash_map[file_hash] = [file_info]
+    
+    duplicates = [files for files in hash_map.values() if len(files) > 1]
+    return duplicates
+
+def delete_duplicates(conn, service_name, duplicate_group, date_choice):
+    if date_choice == 'older':
+        duplicate_group.sort(key=lambda x: datetime.fromtimestamp(x['creation_date']))
+    elif date_choice == 'newer':
+        duplicate_group.sort(key=lambda x: datetime.fromtimestamp(x['creation_date']), reverse=True)
+    
+    for file_info in duplicate_group[1:]:
+        conn.deleteFiles(service_name, file_info['path'])
+        print(f"Deleted {file_info['path']}")
+
 if __name__ == "__main__":
-    urls, delete_small_images, move_files = get_user_input()
+    choice = input("Do you want to download images or clean up the NAS? (download/cleanup): ").strip().lower()
+    if choice in ['download', '']:
+        urls, delete_small_images, move_files = get_user_input()
 
-    if urls:
-        asyncio.run(download_images_from_file(urls))
+        if urls:
+            asyncio.run(download_images_from_file(urls))
 
-        # copy files to the NAS
-        for url, folder_name, depth in urls:
-            list_and_copy_files_to_nas_photos_library(NAS_IP, NAS_USERNAME, NAS_PASSWORD, folder_name, folder_name, delete_small_images, move_files)
+            # copy files to the NAS
+            for url, folder_name, depth in urls:
+                list_and_copy_files_to_nas_photos_library(NAS_IP, NAS_USERNAME, NAS_PASSWORD, folder_name, folder_name, delete_small_images, move_files)
+    elif choice == 'cleanup':
+        cleanup_nas_images(NAS_IP, NAS_USERNAME, NAS_PASSWORD)
+    else:
+        print("Invalid choice. Please enter 'download' or 'cleanup'.")
