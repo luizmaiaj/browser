@@ -11,6 +11,8 @@ from smb.SMBConnection import SMBConnection
 
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+DEFAULT_MAX_DEPTH = 0
+DEFAULT_NUMBER_OF_WORKERS = 50
 
 IMAGE_INFO_FILE = 'image_info.json'
 visited_urls = set()
@@ -94,14 +96,7 @@ def calculate_image_hash(img_bytes):
 def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder):
     conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
     assert conn.connect(nas_ip, 139)
-    
-    # List shared folders
-    # shared_folders = conn.listShares()
-    # print("Shared Folders:")
-    # for share in shared_folders:
-    #     if not share.isSpecial and share.name not in ['NETLOGON', 'SYSVOL']:
-    #         print(f"- {share.name}")
-    
+
     # List folders in the Photos library
     print("\nFolders in Photos Library:")
     photos_folders = conn.listPath('home', '/Photos/PhotoLibrary')
@@ -110,7 +105,7 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
         if folder.isDirectory and folder.filename not in ['.', '..']:
             print(f"- {folder.filename}")
             folder_names.append(folder.filename)
-    
+
     # Ask the user to select an existing folder or create a new one
     new_folder_name = ""
     new_folder_path = ""
@@ -130,10 +125,18 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
     # retrieving the list of existing files
     existing_files = conn.listPath('home', new_folder_path)
 
+    # Ask the user if images under 10k bytes should be deleted
+    delete_small_images = input("Do you want to delete images under 10k bytes before copying? (yes/no): ").strip().lower() == 'yes'
+
     # Copy files to the selected or new folder, skipping existing files
     for filename in os.listdir(local_folder):
         local_file_path = os.path.join(local_folder, filename)
         if os.path.isfile(local_file_path):
+            if delete_small_images and os.path.getsize(local_file_path) < 10000:
+                print(f"Deleting small image file: {filename}")
+                os.remove(local_file_path)
+                continue
+
             remote_file_path = f"{new_folder_path}/{filename}"
             try:
                 existing_filenames = [file.filename for file in existing_files]
@@ -151,7 +154,7 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
     
     conn.close()
 
-async def download_images_async(url, folder_name='downloaded_images', max_depth=1, max_workers=50):
+async def download_images_async(url, folder_name='downloaded_images', max_depth=DEFAULT_MAX_DEPTH, max_workers=DEFAULT_NUMBER_OF_WORKERS):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
     else:
