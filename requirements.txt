@@ -6,3 +6,6 @@ aiohttp
 pysmb
 validators
 python-dotenv
+google-api-python-client
+pillow
+duckduckgo-search

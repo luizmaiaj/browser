@@ -5,11 +5,18 @@ import hashlib
 import json
 from smb.SMBConnection import SMBConnection
 
-def calculate_file_hash(conn, service_name, file_path):
+def calculate_file_hash(conn, service_name, file_path, file):
     file_obj = BytesIO()
     conn.retrieveFile(service_name, file_path, file_obj)
     file_obj.seek(0)
-    return hashlib.md5(file_obj.read()).hexdigest()
+    file_hash = hashlib.md5(file_obj.read()).hexdigest()
+
+    return {
+        'path': file_path,
+        'hash': file_hash,
+        'creation_date': file.create_time,
+        'size': file.file_size
+    }
 
 def delete_files_by_size(conn, service_name, image_data, size_limit):
     impacted_files = [file_info for file_info in image_data if file_info['size'] <= size_limit]
@@ -125,20 +132,14 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
         for file in nas_files:
             if file.filename not in ['.', '..']:
                 file_path = f"{folder_path}/{file.filename}"
-
                 print(f"Processing file: {file_path}")
 
                 if file.isDirectory:
                     traverse_nas_folder(file_path)
                 else:
-                    file_hash = calculate_file_hash(conn, 'home', file_path)
-                    print(f"Hash for file {file_path}: {file_hash}")
-                    image_data.append({
-                        'path': file_path,
-                        'hash': file_hash,
-                        'creation_date': file.create_time,
-                        'size': file.file_size
-                    })
+                    file_info = calculate_file_hash(conn, 'home', file_path, file)
+                    print(f"Hash for file {file_info['path']}: {file_info['hash']}")
+                    image_data.append(file_info)
 
     choice = input("Do you want to load the latest nas_images.json or recalculate the hashes? (load/recalculate): ").strip().lower()
     if choice == 'load' and os.path.exists('nas_images.json'):

@@ -44,6 +44,21 @@ async def fetch_url(session, url):
         return await response.text()
 
 async def process_url(session, url, depth, max_depth, image_info):
+    """
+    Process a given URL to extract new image URLs and new URLs for further processing.
+
+    Parameters:
+        session (aiohttp.ClientSession): The HTTP client session used for fetching the URL.
+        url (str): The URL of the webpage to process.
+        depth (int): The current depth in the recursive search.
+        max_depth (int): The maximum depth to which the recursive search should go.
+        image_info (dict): A dictionary containing information about images already processed.
+
+    Returns:
+        tuple: A tuple containing two lists - new image URLs and new URLs for further processing.
+    """
+
+    # Prevent concurrent modification of visited_urls set
     async with lock:
         if url in visited_urls or depth > max_depth:
             return [], []
