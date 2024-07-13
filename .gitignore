@@ -1,5 +1,6 @@
 downloaded_images
-downloaded_images_1
+downloaded_images*
 image_info.json
 url_list.csv
 nas_images.json
+__pycache__
