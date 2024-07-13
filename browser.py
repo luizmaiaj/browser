@@ -11,7 +11,7 @@ import aiohttp
 import validators
 from bs4 import BeautifulSoup
 from dotenv import find_dotenv, load_dotenv
-from PIL import Image, ImageFile
+from PIL import ImageFile
 from smb.SMBConnection import SMBConnection
 
 load_dotenv(find_dotenv(raise_error_if_not_found=True))
@@ -33,12 +33,12 @@ lock = asyncio.Lock()
 
 def load_image_info():
     if os.path.exists(IMAGE_INFO_FILE):
-        with open(IMAGE_INFO_FILE, 'r') as f:
+        with open(file=IMAGE_INFO_FILE, mode='r', encoding='utf-8') as f:
             return json.load(f)
     return {}
 
 def save_image_info(image_info):
-    with open(IMAGE_INFO_FILE, 'w') as f:
+    with open(file=IMAGE_INFO_FILE, mode='w', encoding='utf-8') as f:
         json.dump(image_info, f)
 
 async def fetch_url(session, url):
@@ -80,8 +80,7 @@ async def download_image(session, img_url, folder_name, image_info):
     try:
         async with session.get(img_url) as response:
             img_content = await response.read()
-        
-        img = Image.open(BytesIO(img_content))
+
         img_hash = calculate_image_hash(img_content)
         
         base_name = os.path.basename(urlparse(img_url).path)
@@ -105,7 +104,14 @@ async def download_image(session, img_url, folder_name, image_info):
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
 
+def calculate_file_hash(conn, service_name, file_path):
+    file_obj = BytesIO()
+    conn.retrieveFile(service_name, file_path, file_obj)
+    file_obj.seek(0)
+    return hashlib.md5(file_obj.read()).hexdigest()
+
 def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_folder, nas_folder_name, delete_small_images, move_files=False):
+
     conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
     assert conn.connect(nas_ip, 139)
 
@@ -146,7 +152,7 @@ def list_and_copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password
             except Exception as e:
                 print(f"Error checking existing files: {e}")
                 continue
-            
+
             with open(local_file_path, 'rb') as file_obj:
                 file_bytes = file_obj.read()
                 conn.storeFile('home', remote_file_path, BytesIO(file_bytes))
@@ -182,7 +188,7 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
             os.makedirs(folder_name)
 
     image_info = load_image_info()
-    
+
     async with aiohttp.ClientSession() as session:
         tasks = [process_url(session, url, 0, max_depth, image_info)]
         img_download_tasks = []
@@ -190,17 +196,17 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
         while tasks:
             new_tasks = []
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            
+
             for result in results:
                 if isinstance(result, Exception):
                     print(f"An error occurred: {result}")
                     continue
-                
+
                 new_img_urls, new_urls = result
                 img_download_tasks.extend([download_image(session, img_url, folder_name, image_info) for img_url in new_img_urls])
                 new_tasks.extend([process_url(session, new_url, new_depth, max_depth, image_info) for new_url, new_depth in new_urls if new_depth <= max_depth])
             tasks = new_tasks[:max_workers]  # Limit concurrent tasks
-            
+
             # Process image downloads
             while img_download_tasks:
                 batch = img_download_tasks[:max_workers]
@@ -235,7 +241,7 @@ def is_valid_folder_name(folder_name):
 def get_user_input():
     choice = 'new'
     urls = load_url_list()
-    
+
     if urls:
         print("Available URLs and corresponding folders:")
         for idx, (url, folder, depth) in enumerate(urls, start=1):
@@ -248,7 +254,7 @@ def get_user_input():
                     choice = 'new'
                 break
             print("Invalid input. Please enter 'file' or 'new'.")
-        
+
         print(f"Source: {choice}.")
 
     if choice == 'new':
@@ -257,7 +263,7 @@ def get_user_input():
             if validators.url(website_url):
                 break
             print("Invalid URL. Please enter a valid website URL.")
-        
+
         print(f"URL: {website_url}.")
 
         while True:
@@ -265,7 +271,7 @@ def get_user_input():
             if is_valid_folder_name(folder_name):
                 break
             print("Invalid folder name. Please enter a valid folder name.")
-        
+
         print(f"Folder: {folder_name}.")
 
         try:
@@ -286,24 +292,28 @@ def get_user_input():
                 delete_small_images = delete_small_images_input in ['yes', 'y']
             break
         print("Invalid input. Please answer with yes, no, y, or n.")
-    
+
     print(f"Delete small images: {delete_small_images}.")
+
+    move_files = False
 
     while True:
         move_files_input = input("Do you want to move images or copy? (move/copy): ").strip().lower()
-        if move_files_input in ['move', 'copy', '']:
-            if move_files_input == '':
-                move_files = False
-            else:
-                move_files = move_files_input == 'move'
+        if move_files_input in ['copy', '']:
+            move_files = False
             break
+        elif move_files_input == 'move':
+            move_files = True
+            break
+
         print("Invalid input. Please answer with move or copy.")
-    
+
     print(f"Move images: {move_files}.")
 
     return urls, delete_small_images, move_files
 
 def cleanup_nas_images(nas_ip, nas_username, nas_password):
+
     conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
     assert conn.connect(nas_ip, 139)
 
@@ -343,7 +353,7 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
             json.dump(image_data, f, default=str)
 
     duplicates = find_duplicates(image_data)
-    
+
     if duplicates:
         print("Duplicate files found:")
         date_choice = input("Delete older or newer files? (older/newer): ").strip().lower()
@@ -357,7 +367,7 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
         if delete_choice == 'yes':
             for dup_group in duplicates:
                 delete_duplicates(conn, 'home', dup_group, date_choice)
-    
+
     # Ask the user if they want to delete files based on size
     size_delete_choice = input("Do you want to delete files based on size? (yes/no): ").strip().lower()
     if size_delete_choice == 'yes':
@@ -368,12 +378,12 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
 
 def delete_files_by_size(conn, service_name, image_data, size_limit):
     impacted_files = [file_info for file_info in image_data if file_info['size'] <= size_limit]
-    
+
     if impacted_files:
         print("The following files will be deleted based on the size limit:")
         for file_info in impacted_files:
             print(f"{file_info['path']} (Size: {file_info['size']} bytes)")
-        
+
         confirm_delete = input("Do you want to proceed with deleting these files? (yes/no): ").strip().lower()
         if confirm_delete == 'yes':
             for file_info in impacted_files:
@@ -381,12 +391,6 @@ def delete_files_by_size(conn, service_name, image_data, size_limit):
                 print(f"Deleted {file_info['path']} (Size: {file_info['size']} bytes)")
     else:
         print("No files meet the size criteria for deletion.")
-
-def calculate_file_hash(conn, service_name, file_path):
-    file_obj = BytesIO()
-    conn.retrieveFile(service_name, file_path, file_obj)
-    file_obj.seek(0)
-    return hashlib.md5(file_obj.read()).hexdigest()
 
 def find_duplicates(image_data):
     hash_map = {}
@@ -396,7 +400,7 @@ def find_duplicates(image_data):
             hash_map[file_hash].append(file_info)
         else:
             hash_map[file_hash] = [file_info]
-    
+
     duplicates = [files for files in hash_map.values() if len(files) > 1]
     return duplicates
 
@@ -405,12 +409,13 @@ def delete_duplicates(conn, service_name, duplicate_group, date_choice):
         duplicate_group.sort(key=lambda x: datetime.fromtimestamp(x['creation_date']))
     elif date_choice == 'newer':
         duplicate_group.sort(key=lambda x: datetime.fromtimestamp(x['creation_date']), reverse=True)
-    
+
     for file_info in duplicate_group[1:]:
         conn.deleteFiles(service_name, file_info['path'])
         print(f"Deleted {file_info['path']}")
 
-if __name__ == "__main__":
+def main():
+
     choice = input("Do you want to download images or clean up the NAS? (download/cleanup): ").strip().lower()
     if choice in ['download', '']:
         urls, delete_small_images, move_files = get_user_input()
@@ -425,3 +430,6 @@ if __name__ == "__main__":
         cleanup_nas_images(NAS_IP, NAS_USERNAME, NAS_PASSWORD)
     else:
         print("Invalid choice. Please enter 'download' or 'cleanup'.")
+
+if __name__ == "__main__":
+    main()
