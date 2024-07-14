@@ -94,6 +94,11 @@ async def download_image(session, img_url, folder_name, image_info):
         async with session.get(img_url) as response:
             img_content = await response.read()
 
+        # Skip files smaller than 15 KB
+        if len(img_content) < 15 * 1024:
+            print(f"Skipping {img_url} because it is smaller than 15 KB")
+            return
+
         img_hash = calculate_image_hash(img_content)
         
         base_name = os.path.basename(urlparse(img_url).path)
@@ -147,8 +152,10 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
                     continue
 
                 new_img_urls, new_urls = result
-                # Filter out SVG URLs
-                new_img_urls = [img_url for img_url in new_img_urls if not img_url.lower().endswith('.svg')]
+                # Filter out SVG URLs and URLs without an extension
+                valid_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp')
+                new_img_urls = [img_url for img_url in new_img_urls if img_url.lower().endswith(valid_extensions)]
+
                 img_download_tasks.extend([download_image(session, img_url, folder_name, image_info) for img_url in new_img_urls])
                 new_tasks.extend([process_url(session, new_url, new_depth, max_depth, image_info) for new_url, new_depth in new_urls if new_depth <= max_depth])
             tasks = new_tasks[:max_workers]  # Limit concurrent tasks
