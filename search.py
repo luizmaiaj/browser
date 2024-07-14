@@ -54,28 +54,49 @@ def download_image(url):
     return img
 
 def generate_folder_name(url):
-    # Remove query parameters and trailing slash from the URL
-    url = re.sub(r'\?.*$', '', url).rstrip('/')
-
     # Extract the domain name and path from the URL
-    match = re.match(r'https://([^/]+)(/.*)', url)
+    match = re.match(r'https://([^/]+)(/.*)?', url)
     if match:
         domain, path = match.groups()
+        path = path if path else ""
     else:
         return None
 
+    # Remove "www." and common domain extensions from the domain name
+    domain = re.sub(r'(www\.)?([^.]+\.[^.]+)', r'\2', domain)
+    domain = re.sub(r'\.(com|net|org|edu|gov|mil|int|info|biz|pics|co|us|uk|ca|de|jp|fr|au|in)$', '', domain)
+
+    # Remove HTML and file extensions from the path
+    path = re.sub(r'\.html?$|/\w+\.\w+$', '', path)
+
     # Remove common words that don't contribute to the uniqueness of the folder name
-    stop_words = ['pics', 'pictures', 'photos', 'images', 'gallery', 'galleries']
+    stop_words = ['news', 'pics', 'pictures', 'photos', 'images', 'gallery', 'galleries', 'search', 'pic', 'collection', 'articles', 'best', 'photo', 'video']
     path = re.sub(r'\b(' + '|'.join(stop_words) + r')\b', '', path)
 
     # Remove non-alphanumeric characters and replace spaces with hyphens
     folder_name = re.sub(r'[^a-zA-Z0-9]', '-', path).strip('-').lower()
+
+    # Truncate the domain and path to fit within the length limit
+    max_length = 42
+    combined_length = len(domain) + len(folder_name)
+    if combined_length > max_length:
+        if len(domain) > max_length // 2 and len(folder_name) > max_length // 2:
+            domain = domain[:max_length // 2]
+            folder_name = folder_name[:max_length // 2]
+        elif len(domain) > max_length // 2:
+            domain = domain[:max_length - len(folder_name)]
+        else:
+            folder_name = folder_name[:max_length - len(domain)]
 
     # Generate a short hash of the URL to ensure uniqueness
     url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
 
     # Combine the domain name, folder name, and hash to create the final folder name
     folder_name = f"{domain}-{folder_name}-{url_hash}"
+
+    # Ensure the total length does not exceed 20 characters
+    if len(folder_name) > 50:
+        folder_name = folder_name[:50-len(url_hash)-1] + '-' + url_hash
 
     return folder_name
 
@@ -114,4 +135,6 @@ def main():
             print(url)
 
 if __name__ == "__main__":
-    main()
+    # main()
+
+    generate_folder_name('https://www.pornhub.com/video/search?search=perfect+little+round+ass')

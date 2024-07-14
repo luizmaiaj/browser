@@ -11,7 +11,6 @@ from PIL import ImageFile
 
 from user_input import get_user_input
 from nas import copy_files_to_nas_photos_library, cleanup_nas_images
-from search import search_text_duckduckgo, generate_folder_name
 
 load_dotenv(find_dotenv(raise_error_if_not_found=True))
 
@@ -86,7 +85,7 @@ async def process_url(session, url, depth, max_depth, image_info):
                     new_urls.append((next_page_url, depth + 1))
 
         return list(new_img_urls), new_urls
-    except Exception as e:
+    except ValueError as e:
         print(f"Failed to fetch URL: {url}, error: {e}")
         return [], []
 
@@ -112,7 +111,7 @@ async def download_image(session, img_url, folder_name, image_info):
             print(f"Downloaded {img_name}")
         image_info[img_url] = {'hash': img_hash, 'filename': img_name}
 
-    except Exception as e:
+    except ValueError as e:
         print(f"Failed to download image at URL: {img_url}, error: {e}")
 
 def calculate_image_hash(img_bytes):
@@ -148,6 +147,8 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
                     continue
 
                 new_img_urls, new_urls = result
+                # Filter out SVG URLs
+                new_img_urls = [img_url for img_url in new_img_urls if not img_url.lower().endswith('.svg')]
                 img_download_tasks.extend([download_image(session, img_url, folder_name, image_info) for img_url in new_img_urls])
                 new_tasks.extend([process_url(session, new_url, new_depth, max_depth, image_info) for new_url, new_depth in new_urls if new_depth <= max_depth])
             tasks = new_tasks[:max_workers]  # Limit concurrent tasks
@@ -173,7 +174,7 @@ async def download_images_from_file(urls):
 
 def main():
 
-    choice = input("Do you want to download images or clean up the NAS? (download/cleanup/search): ").strip().lower()
+    choice = input("Do you want to download images or clean up the NAS? (download/cleanup): ").strip().lower()
     if choice in ['download', '']:
         urls, delete_small_images, move_files = get_user_input(URL_LIST_FILE)
 
@@ -185,15 +186,6 @@ def main():
                 copy_files_to_nas_photos_library(NAS_IP, NAS_USERNAME, NAS_PASSWORD, folder_name, folder_name, delete_small_images, move_files)
     elif choice == 'cleanup':
         cleanup_nas_images(NAS_IP, NAS_USERNAME, NAS_PASSWORD)
-    elif choice == 'search':
-        query = input("Enter the search query: ").strip()
-        duckduckgo_results = search_text_duckduckgo(query, 50)
-        duckduckgo_urls = [result['href'] for result in duckduckgo_results]
-
-        print("\nDuckDuckGo Search URLs:")
-        for url in duckduckgo_urls:
-            folder_name = generate_folder_name(url)
-            print(f"URL: {url}, Folder name: {folder_name}")
     else:
         print("Invalid choice. Please enter 'download' or 'cleanup'.")
 
