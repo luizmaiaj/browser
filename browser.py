@@ -11,6 +11,7 @@ from PIL import ImageFile
 
 from user_input import get_user_input
 from nas import copy_files_to_nas_photos_library, cleanup_nas_images
+from search import search_text_duckduckgo, generate_folder_name
 
 load_dotenv(find_dotenv(raise_error_if_not_found=True))
 
@@ -172,7 +173,7 @@ async def download_images_from_file(urls):
 
 def main():
 
-    choice = input("Do you want to download images or clean up the NAS? (download/cleanup): ").strip().lower()
+    choice = input("Do you want to download images or clean up the NAS? (download/cleanup/search): ").strip().lower()
     if choice in ['download', '']:
         urls, delete_small_images, move_files = get_user_input(URL_LIST_FILE)
 
@@ -184,6 +185,15 @@ def main():
                 copy_files_to_nas_photos_library(NAS_IP, NAS_USERNAME, NAS_PASSWORD, folder_name, folder_name, delete_small_images, move_files)
     elif choice == 'cleanup':
         cleanup_nas_images(NAS_IP, NAS_USERNAME, NAS_PASSWORD)
+    elif choice == 'search':
+        query = input("Enter the search query: ").strip()
+        duckduckgo_results = search_text_duckduckgo(query, 50)
+        duckduckgo_urls = [result['href'] for result in duckduckgo_results]
+
+        print("\nDuckDuckGo Search URLs:")
+        for url in duckduckgo_urls:
+            folder_name = generate_folder_name(url)
+            print(f"URL: {url}, Folder name: {folder_name}")
     else:
         print("Invalid choice. Please enter 'download' or 'cleanup'.")
 
