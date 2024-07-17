@@ -4,6 +4,9 @@ from datetime import datetime
 import hashlib
 import json
 from smb.SMBConnection import SMBConnection
+import tempfile
+
+from upscaler import ensure_executable, list_models, enhance_image
 
 def calculate_file_hash(conn, service_name, file_path, file):
     file_obj = BytesIO()
@@ -81,33 +84,36 @@ def copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_f
     existing_files = conn.listPath('home', new_folder_path)
 
     # Copy or move files to the selected or new folder, skipping existing files
-    for filename in os.listdir(local_folder):
-        local_file_path = os.path.join(local_folder, filename)
-        if os.path.isfile(local_file_path):
-            if delete_small_images and os.path.getsize(local_file_path) < 10000:
-                print(f"Deleting small image file: {filename}")
-                os.remove(local_file_path)
-                continue
-
-            remote_file_path = f"{new_folder_path}/{filename}"
-            try:
-                existing_filenames = [file.filename for file in existing_files]
-                if filename in existing_filenames:
-                    print(f"File {filename} already exists in {nas_folder_name}. Skipping.")
+    try:
+        for filename in os.listdir(local_folder):
+            local_file_path = os.path.join(local_folder, filename)
+            if os.path.isfile(local_file_path):
+                if delete_small_images and os.path.getsize(local_file_path) < 10000:
+                    print(f"Deleting small image file: {filename}")
+                    os.remove(local_file_path)
                     continue
-            except Exception as e:
-                print(f"Error checking existing files: {e}")
-                continue
 
-            with open(local_file_path, 'rb') as file_obj:
-                file_bytes = file_obj.read()
-                conn.storeFile('home', remote_file_path, BytesIO(file_bytes))
+                remote_file_path = f"{new_folder_path}/{filename}"
+                try:
+                    existing_filenames = [file.filename for file in existing_files]
+                    if filename in existing_filenames:
+                        print(f"File {filename} already exists in {nas_folder_name}. Skipping.")
+                        continue
+                except Exception as e:
+                    print(f"Error checking existing files: {e}")
+                    continue
 
-            if move_files:
-                os.remove(local_file_path)
-                print(f"Moved {filename} to {nas_folder_name}")
-            else:
-                print(f"Copied {filename} to {nas_folder_name}")
+                with open(local_file_path, 'rb') as file_obj:
+                    file_bytes = file_obj.read()
+                    conn.storeFile('home', remote_file_path, BytesIO(file_bytes))
+
+                if move_files:
+                    os.remove(local_file_path)
+                    print(f"Moved {filename} to {nas_folder_name}")
+                else:
+                    print(f"Copied {filename} to {nas_folder_name}")
+    except ValueError as e:
+        print(f"{local_folder}: {e}")
 
     if move_files:
         # Remove the local folder after all files have been moved
@@ -119,6 +125,19 @@ def copy_files_to_nas_photos_library(nas_ip, nas_username, nas_password, local_f
 
     conn.close()
 
+def traverse_nas_folder(conn, folder_path):
+    files_list = []
+    nas_files = conn.listPath('home', folder_path)
+    for file in nas_files:
+        if file.filename not in ['.', '..']:
+            file_path = f"{folder_path}/{file.filename}"
+            print(f"Processing file: {file_path}")
+            if file.isDirectory:
+                files_list.extend(traverse_nas_folder(conn, file_path))
+            else:
+                files_list.append(file_path)
+    return files_list
+
 def cleanup_nas_images(nas_ip, nas_username, nas_password):
 
     conn = SMBConnection(nas_username, nas_password, 'local_machine', 'remote_machine', use_ntlm_v2=True)
@@ -127,7 +146,7 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
     nas_folder_path = '/Photos/PhotoLibrary'
     image_data = []
 
-    def traverse_nas_folder(folder_path):
+    def recursive_hashes(folder_path):
         nas_files = conn.listPath('home', folder_path)
         for file in nas_files:
             if file.filename not in ['.', '..']:
@@ -135,7 +154,7 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
                 print(f"Processing file: {file_path}")
 
                 if file.isDirectory:
-                    traverse_nas_folder(file_path)
+                    recursive_hashes(file_path)
                 else:
                     file_info = calculate_file_hash(conn, 'home', file_path, file)
                     print(f"Hash for file {file_info['path']}: {file_info['hash']}")
@@ -148,13 +167,12 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
         print("Loaded image data from nas_images.json.")
     else:
         print("Recalculating hashes...")
-        traverse_nas_folder(nas_folder_path)
+        recursive_hashes(nas_folder_path)
 
         with open(file='nas_images.json', mode='w', encoding='utf-8') as f:
             json.dump(image_data, f, default=str)
 
     duplicates = find_duplicates(image_data)
-
     if duplicates:
         print("Duplicate files found:")
         date_choice = input("Delete older or newer files? (older/newer): ").strip().lower()
@@ -175,4 +193,63 @@ def cleanup_nas_images(nas_ip, nas_username, nas_password):
         size_limit = int(input("Enter the size limit in bytes: ").strip())
         delete_files_by_size(conn, 'home', image_data, size_limit)
 
+    # New option to list and upscale files smaller than 50k
+    list_small_files_choice = input("Do you want to list and upscale files smaller than 50k? (yes/no): ").strip().lower()
+    if list_small_files_choice == 'yes':
+        small_files = list_small_files(image_data, 25000)
+        if small_files:
+            upscale_choice = input("Do you want to upscale these files? (yes/no): ").strip().lower()
+            if upscale_choice == 'yes':
+                upscale_small_files(conn, small_files)
+
     conn.close()
+
+def list_small_files(image_data, size_limit):
+    small_files = [file for file in image_data if file['size'] < size_limit]
+    if small_files:
+        print(f"Files smaller than {size_limit} bytes:")
+        for file in small_files:
+            print(f"{file['path']} (Size: {file['size']} bytes)")
+        return small_files
+    else:
+        print(f"No files smaller than {size_limit} bytes found.")
+        return []
+
+def upscale_small_files(conn, small_files):
+    ensure_executable()
+    chosen_model = 'realesrgan-x4plus'
+
+    # Optionally, upload the upscaled image back to NAS
+    upload_choice = input(f"Do you want to upload files back to NAS? (yes/no): ").strip().lower()
+
+    for file in small_files:
+        nas_path = file['path']
+        file_name, file_extension = os.path.splitext(os.path.basename(nas_path))
+        output_file_name = f"{file_name}_upscaled{file_extension}"
+        
+        if file_extension.lower() in ['.jpg', '.jpeg', '.png']:
+            # Create a temporary directory to store the downloaded and upscaled files
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Download the file from NAS to a temporary local file
+                local_input_path = os.path.join(temp_dir, os.path.basename(nas_path))
+                with open(local_input_path, 'wb') as f:
+                    conn.retrieveFile('home', nas_path, f)
+
+                # Set the local output path
+                local_output_path = os.path.join(temp_dir, output_file_name)
+
+                # Upscale the image
+                enhance_image(local_input_path, local_output_path, chosen_model, scale=4, fmt=file_extension.lstrip('.'))
+
+                print(f"Upscaled {nas_path} to {local_output_path}")
+
+                # Optionally, upload the upscaled image back to NAS
+                if upload_choice == 'yes':
+                    nas_output_path = os.path.join(os.path.dirname(nas_path), output_file_name)
+                    with open(local_output_path, 'rb') as f:
+                        conn.storeFile('home', nas_output_path, f)
+                    print(f"Uploaded {local_output_path} to NAS as {nas_output_path}")
+
+            # The temporary directory and its contents are automatically cleaned up when the context manager exits
+        else:
+            print(f"Skipping {nas_path}: not a supported image format")

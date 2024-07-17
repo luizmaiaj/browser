@@ -25,9 +25,9 @@ def search_image_google(query, api_key, cx, num_results=1):
         print(f"An error occurred: {e}")
         return []
 
-def search_image_duckduckgo(keywords, max_results=1):
+def search_image_duckduckgo(keywords, max_results=10):
     ddgs = DDGS()
-    results = ddgs.images(keywords, max_results=max_results)
+    results = ddgs.images(keywords, safesearch='off', max_results=max_results)
     return results
 
 def search_text_google(query, api_key, cx, num_results=10):
@@ -121,7 +121,7 @@ def main():
             print(url)
     else:
         # google_results = search_text_google(query, API_KEY_GOOGLE, CX_GOOGLE)
-        duckduckgo_results = search_text_duckduckgo(query, 50)
+        duckduckgo_results = search_image_duckduckgo(query)
 
         # google_urls = [result['link'] for result in google_results]
         duckduckgo_urls = [result['href'] for result in duckduckgo_results]

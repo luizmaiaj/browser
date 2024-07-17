@@ -1,6 +1,5 @@
 requests
 beautifulsoup4
-Pillow
 numpy
 aiohttp
 pysmb
@@ -9,3 +8,6 @@ python-dotenv
 google-api-python-client
 pillow
 duckduckgo-search
+torch
+torchvision
+realesrgan
