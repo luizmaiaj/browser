@@ -10,7 +10,7 @@ from dotenv import find_dotenv, load_dotenv
 from PIL import ImageFile
 
 from user_input import get_user_input
-from nas import copy_files_to_nas_photos_library, cleanup_nas_images
+from nas import Nas
 
 load_dotenv(find_dotenv(raise_error_if_not_found=True))
 
@@ -181,6 +181,8 @@ async def download_images_from_file(urls):
 
 def main():
 
+    b3_nas = Nas(NAS_USERNAME, NAS_IP, NAS_PASSWORD)
+
     choice = input("Do you want to download images or clean up the NAS? (download/cleanup): ").strip().lower()
     if choice in ['download', '']:
         urls, delete_small_images, move_files = get_user_input(URL_LIST_FILE)
@@ -190,9 +192,9 @@ def main():
 
             # copy files to the NAS
             for url, folder_name, depth in urls:
-                copy_files_to_nas_photos_library(NAS_IP, NAS_USERNAME, NAS_PASSWORD, folder_name, folder_name, delete_small_images, move_files)
+                b3_nas.copy_files_to_nas_photos_library(folder_name, folder_name, delete_small_images, move_files)
     elif choice == 'cleanup':
-        cleanup_nas_images(NAS_IP, NAS_USERNAME, NAS_PASSWORD)
+        b3_nas.cleanup_nas_images()
     else:
         print("Invalid choice. Please enter 'download' or 'cleanup'.")
 
