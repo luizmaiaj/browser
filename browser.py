@@ -2,21 +2,17 @@ import asyncio
 import hashlib
 import json
 import os
+from threading import Lock
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
 from aiohttp import ClientError, ServerDisconnectedError
 from bs4 import BeautifulSoup
 from dotenv import find_dotenv, load_dotenv
+from nas import Nas
 from PIL import ImageFile
 
-from concurrent.futures import ThreadPoolExecutor
-from threading import Lock
-
 from user_input import get_user_input
-from nas import Nas
-
-# from search import extract_links_to_csv
 
 load_dotenv(find_dotenv(raise_error_if_not_found=True))
 
