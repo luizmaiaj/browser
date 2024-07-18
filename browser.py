@@ -5,12 +5,15 @@ import os
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
+from aiohttp import ClientError, ServerDisconnectedError
 from bs4 import BeautifulSoup
 from dotenv import find_dotenv, load_dotenv
 from PIL import ImageFile
 
 from user_input import get_user_input
 from nas import Nas
+
+# from search import extract_links_to_csv
 
 load_dotenv(find_dotenv(raise_error_if_not_found=True))
 
@@ -89,35 +92,48 @@ async def process_url(session, url, depth, max_depth, image_info):
         print(f"Failed to fetch URL: {url}, error: {e}")
         return [], []
 
-async def download_image(session, img_url, folder_name, image_info):
-    try:
-        async with session.get(img_url) as response:
-            img_content = await response.read()
+async def download_image(session, img_url, folder_name, image_info, max_retries=3):
+    retry_count = 0
+    while retry_count < max_retries:
+        try:
+            async with session.get(img_url) as response:
+                img_content = await response.read()
+                # Skip files smaller than 15 KB
+                if len(img_content) < 15 * 1024:
+                    print(f"Skipping {img_url} because it is smaller than 15 KB")
+                    return
 
-        # Skip files smaller than 15 KB
-        if len(img_content) < 15 * 1024:
-            print(f"Skipping {img_url} because it is smaller than 15 KB")
-            return
+                img_hash = calculate_image_hash(img_content)
+                base_name = os.path.basename(urlparse(img_url).path)
+                img_name = os.path.join(folder_name, base_name)
 
-        img_hash = calculate_image_hash(img_content)
+                # Check for existing files and prepend numbers if necessary
+                if os.path.exists(img_name):
+                    prefix = 1
+                    while os.path.exists(img_name):
+                        img_name = os.path.join(folder_name, f"{prefix:02d}_{base_name}")
+                        prefix += 1
+
+                with open(img_name, 'wb') as img_file:
+                    img_file.write(img_content)
+                print(f"Downloaded {img_name}")
+                image_info[img_url] = {'hash': img_hash, 'filename': img_name}
+                return  # Successfully downloaded, exit the function
+
+        except (ClientError, ServerDisconnectedError, asyncio.TimeoutError) as e:
+            retry_count += 1
+            if retry_count < max_retries:
+                wait_time = 2 ** retry_count  # Exponential backoff
+                print(f"Error downloading {img_url}: {e}. Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+            else:
+                print(f"Failed to download image at URL: {img_url} after {max_retries} attempts. Error: {e}")
+        except Exception as e:
+            print(f"Unexpected error downloading image at URL: {img_url}. Error: {e}")
         
-        base_name = os.path.basename(urlparse(img_url).path)
-        img_name = os.path.join(folder_name, base_name)
-
-        # Check for existing files and prepend numbers if necessary
-        if os.path.exists(img_name):
-            prefix = 1
-            while os.path.exists(img_name):
-                img_name = os.path.join(folder_name, f"{prefix:02d}_{base_name}")
-                prefix += 1
-
-        with open(img_name, 'wb') as img_file:
-            img_file.write(img_content)
-            print(f"Downloaded {img_name}")
-        image_info[img_url] = {'hash': img_hash, 'filename': img_name}
-
-    except ValueError as e:
-        print(f"Failed to download image at URL: {img_url}, error: {e}")
+    # If we've exhausted all retries or encountered an unexpected error, we still return
+    print(f"Skipping {img_url} due to persistent errors")
+    return
 
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
@@ -192,11 +208,96 @@ def main():
 
             # copy files to the NAS
             for url, folder_name, depth in urls:
-                b3_nas.copy_files_to_nas_photos_library(folder_name, folder_name, delete_small_images, move_files)
+                b3_nas.copy_files_to_nas_photos_library(folder_name, 'home', '/Photos/PhotoLibrary/', folder_name, delete_small_images, move_files)
     elif choice == 'cleanup':
-        b3_nas.cleanup_nas_images()
+        b3_nas.cleanup_nas_images('home', '/Photos/PhotoLibrary/', True, 'newer', 20000)
     else:
         print("Invalid choice. Please enter 'download' or 'cleanup'.")
 
+import requests
+from bs4 import BeautifulSoup
+import csv
+from urllib.parse import urljoin, urlparse
+from validator_collection import validators, checkers, errors
+
+def validate_url(url):
+    try:
+        # Validate the URL
+        validators.url(url)
+        print(f"The URL '{url}' is valid.")
+        return True
+    except errors.InvalidURLError:
+        print(f"The URL '{url}' is invalid.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+    return False
+
+def extract_links_to_csv(url, output_file='links.csv', recursive=False):
+    def get_links(page_url):
+        try:
+            response = requests.get(page_url)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            return [link.get('href') for link in soup.find_all('a') if link.get('href')]
+        except requests.RequestException as e:
+            print(f"Error fetching the URL {page_url}: {e}")
+            return []
+
+    def process_links(link, sub_links):
+        unique_data = set()
+        for href in sub_links:
+            if href != link and href.startswith(link.strip('/')):
+                full_url = href
+                folder = urlparse(link).path.strip('/')
+                if folder:
+                    unique_data.add((full_url, folder, 1))  # Depth is always 1
+        return unique_data
+
+    # Process the initial page
+    initial_links = get_links(url)
+    
+    all_data = set()
+
+    if not recursive:
+        # If not recursive, just process the initial page links
+        for href in initial_links:
+            if href:
+                # Make sure the URL is absolute
+                full_url = urljoin(url, href)
+                # Extract the folder (path) from the URL
+                folder = urlparse(full_url).path.strip('/')
+
+                if folder:
+                    # Set depth to 1 as per requirement
+                    depth = 1
+                    all_data.add((full_url, folder, depth))
+    else:
+        # If recursive, visit each link from the initial page
+        for link in initial_links:
+
+            if validate_url(link):
+                sub_links = get_links(link)
+                all_data.update(process_links(link, sub_links))
+
+    all_data = list(all_data)
+
+    # Write data to CSV file
+    try:
+        with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile, delimiter=';')
+            writer.writerow(['URL', 'Folder', 'Depth'])
+            writer.writerows(all_data)
+        print(f"CSV file '{output_file}' has been created successfully with {len(all_data)} unique entries.")
+    except IOError as e:
+        print(f"Error writing to CSV file: {e}")
+
+# Example usage:
+# extract_links_to_csv('https://example.com', recursive=True)
+
+def search_test():
+    extract_links_to_csv('https://thefappening.pro/all-actresses-list/','url_list.csv', True)
+
 if __name__ == "__main__":
-    main()
+    search_test()
+    # main()
