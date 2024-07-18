@@ -10,6 +10,9 @@ from bs4 import BeautifulSoup
 from dotenv import find_dotenv, load_dotenv
 from PIL import ImageFile
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+
 from user_input import get_user_input
 from nas import Nas
 
@@ -25,12 +28,17 @@ DEFAULT_NUMBER_OF_WORKERS = int(os.getenv('DEFAULT_NUMBER_OF_WORKERS'))
 IMAGE_INFO_FILE = os.getenv('IMAGE_INFO_FILE')
 URL_LIST_FILE = os.getenv('URL_LIST_FILE')
 
+SMALLEST_FILE = 15000
+
 # Ensure truncated images are handled properly
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 visited_urls = set()
 img_urls = set()
 lock = asyncio.Lock()
+
+# Lock for thread-safe access to image_info
+image_info_lock = Lock()
 
 def load_image_info():
     if os.path.exists(IMAGE_INFO_FILE):
@@ -99,8 +107,8 @@ async def download_image(session, img_url, folder_name, image_info, max_retries=
             async with session.get(img_url) as response:
                 img_content = await response.read()
                 # Skip files smaller than 15 KB
-                if len(img_content) < 15 * 1024:
-                    print(f"Skipping {img_url} because it is smaller than 15 KB")
+                if len(img_content) < SMALLEST_FILE:
+                    print(f"Skipping {img_url} because it is smaller than {SMALLEST_FILE} KB")
                     return
 
                 img_hash = calculate_image_hash(img_content)
@@ -117,7 +125,10 @@ async def download_image(session, img_url, folder_name, image_info, max_retries=
                 with open(img_name, 'wb') as img_file:
                     img_file.write(img_content)
                 print(f"Downloaded {img_name}")
-                image_info[img_url] = {'hash': img_hash, 'filename': img_name}
+
+                # Use the lock to ensure thread-safe access to image_info
+                with image_info_lock:
+                    image_info[img_url] = {'hash': img_hash, 'filename': img_name}
                 return  # Successfully downloaded, exit the function
 
         except (ClientError, ServerDisconnectedError, asyncio.TimeoutError) as e:
@@ -138,21 +149,9 @@ async def download_image(session, img_url, folder_name, image_info, max_retries=
 def calculate_image_hash(img_bytes):
     return hashlib.md5(img_bytes).hexdigest()
 
-async def download_images_async(url, folder_name='downloaded_images', max_depth=DEFAULT_MAX_DEPTH, max_workers=DEFAULT_NUMBER_OF_WORKERS):
+async def download_images_async(url, folder_name, max_depth, max_workers, image_info):
     if not os.path.exists(folder_name):
         os.makedirs(folder_name)
-    else:
-        create_new_folder = input(f"Folder '{folder_name}' already exists. Create a new folder? (yes/no): ")
-        if create_new_folder.lower() == 'yes':
-            suffix = 1
-            new_folder_name = f"{folder_name}_{suffix:02d}"
-            while os.path.exists(new_folder_name):
-                suffix += 1
-                new_folder_name = f"{folder_name}_{suffix:02d}"
-            folder_name = new_folder_name
-            os.makedirs(folder_name)
-
-    image_info = load_image_info()
 
     async with aiohttp.ClientSession() as session:
         tasks = [process_url(session, url, 0, max_depth, image_info)]
@@ -186,14 +185,16 @@ async def download_images_async(url, folder_name='downloaded_images', max_depth=
         if img_download_tasks:
             await asyncio.gather(*img_download_tasks)
 
-    save_image_info(image_info)
-    print("All images have been downloaded.")
-
 async def download_images_from_file(urls):
-    async with aiohttp.ClientSession() as session:
-        for url, folder_name, depth in urls:
-            print(f"Starting download for {url} into folder {folder_name} with depth {depth}")
-            await download_images_async(url, folder_name=folder_name, max_depth=depth)
+    image_info = load_image_info()
+
+    tasks = [
+        download_images_async(url, folder_name, depth, DEFAULT_NUMBER_OF_WORKERS, image_info)
+        for url, folder_name, depth in urls
+    ]
+    await asyncio.gather(*tasks)
+
+    save_image_info(image_info)
 
 def main():
 
@@ -214,90 +215,14 @@ def main():
     else:
         print("Invalid choice. Please enter 'download' or 'cleanup'.")
 
-import requests
-from bs4 import BeautifulSoup
-import csv
-from urllib.parse import urljoin, urlparse
-from validator_collection import validators, checkers, errors
-
-def validate_url(url):
-    try:
-        # Validate the URL
-        validators.url(url)
-        print(f"The URL '{url}' is valid.")
-        return True
-    except errors.InvalidURLError:
-        print(f"The URL '{url}' is invalid.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-
-    return False
-
-def extract_links_to_csv(url, output_file='links.csv', recursive=False):
-    def get_links(page_url):
-        try:
-            response = requests.get(page_url)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-            return [link.get('href') for link in soup.find_all('a') if link.get('href')]
-        except requests.RequestException as e:
-            print(f"Error fetching the URL {page_url}: {e}")
-            return []
-
-    def process_links(link, sub_links):
-        unique_data = set()
-        for href in sub_links:
-            if href != link and href.startswith(link.strip('/')):
-                full_url = href
-                folder = urlparse(link).path.strip('/')
-                if folder:
-                    unique_data.add((full_url, folder, 1))  # Depth is always 1
-        return unique_data
-
-    # Process the initial page
-    initial_links = get_links(url)
-    
-    all_data = set()
-
-    if not recursive:
-        # If not recursive, just process the initial page links
-        for href in initial_links:
-            if href:
-                # Make sure the URL is absolute
-                full_url = urljoin(url, href)
-                # Extract the folder (path) from the URL
-                folder = urlparse(full_url).path.strip('/')
-
-                if folder:
-                    # Set depth to 1 as per requirement
-                    depth = 1
-                    all_data.add((full_url, folder, depth))
-    else:
-        # If recursive, visit each link from the initial page
-        for link in initial_links:
-
-            if validate_url(link):
-                sub_links = get_links(link)
-                all_data.update(process_links(link, sub_links))
-
-    all_data = list(all_data)
-
-    # Write data to CSV file
-    try:
-        with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.writer(csvfile, delimiter=';')
-            writer.writerow(['URL', 'Folder', 'Depth'])
-            writer.writerows(all_data)
-        print(f"CSV file '{output_file}' has been created successfully with {len(all_data)} unique entries.")
-    except IOError as e:
-        print(f"Error writing to CSV file: {e}")
-
-# Example usage:
-# extract_links_to_csv('https://example.com', recursive=True)
-
-def search_test():
-    extract_links_to_csv('https://thefappening.pro/all-actresses-list/','url_list.csv', True)
+def delete_empty_folders():
+    directory = os.getcwd()
+    # Walk through the directory
+    for dirpath, dirnames, filenames in os.walk(directory, topdown=False):
+        # Check if the directory is empty
+        if not dirnames and not filenames:
+            print(f"Deleting empty folder: {dirpath}")
+            os.rmdir(dirpath)
 
 if __name__ == "__main__":
-    search_test()
-    # main()
+    main()

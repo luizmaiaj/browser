@@ -11,4 +11,4 @@ duckduckgo-search
 torch
 torchvision
 realesrgan
-validatior-collection
+validator-collection

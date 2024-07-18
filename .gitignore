@@ -3,4 +3,7 @@ downloaded_images*
 image_info.json
 url_list.csv
 nas_images.json
+*.jpg
+*.gif
+*.png
 __pycache__
