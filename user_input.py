@@ -2,7 +2,7 @@ import os
 import csv
 import validators
 
-from search import search_text_duckduckgo, generate_folder_name
+from search import search_text_duckduckgo, generate_folder_name, extract_links_to_csv
 
 def is_valid_folder_name(folder_name):
     # Placeholder for actual folder name validation
@@ -16,26 +16,35 @@ def load_url_list(url_list_file):
             return [(row[0], row[1], int(row[2])) for row in reader if row]
     return []
 
+def print_url_list(urls):
+    print("Available URLs and corresponding folders:")
+    for idx, (url, folder, depth) in enumerate(urls, start=1):
+        print(f"{idx}. URL: {url}, Folder: {folder}, Depth: {depth}")
+
 def get_user_input(url_list_file):
     choice = 'new'
     urls = load_url_list(url_list_file)
 
-    if urls:
-        print("Available URLs and corresponding folders:")
-        for idx, (url, folder, depth) in enumerate(urls, start=1):
-            print(f"{idx}. URL: {url}, Folder: {folder}, Depth: {depth}")
+    download_choices = ['file', 'new', 'search', 'scrape', '']
 
-        while True:
-            choice = input("Do you want to fetch images from the URLs in the file or type a new URL? (file/new/search): ").strip().lower()
-            if choice in ['file', 'new', 'search', '']:
-                if choice == '':
-                    choice = 'new'
-                break
-            print("Invalid input. Please enter 'file' or 'new'.")
+    if not urls:
+        download_choices.remove('file')
+    else:
+        print_url_list(urls)
 
-        print(f"Source: {choice}.")
+    download_choices_str = '/'.join(download_choices)
 
-    if choice in ['new', 'search']:
+    while True:
+        choice = input(f"How do you want to download images? ({download_choices_str}): ").strip().lower()
+        if choice in download_choices:
+            if choice == '':
+                choice = 'new'
+            break
+        print(f"Invalid input. Please enter one of these: {download_choices_str}.")
+
+    print(f"Source: {choice}.")
+
+    if choice in ['new', 'search', 'scrape']:
         try:
             max_depth = int(input("Enter the depth to follow: ").strip())
         except ValueError:
@@ -43,7 +52,7 @@ def get_user_input(url_list_file):
 
         print(f"Depth: {max_depth}.")
 
-        if choice == 'new':
+        if choice in ['new', 'scrape']:
             while True:
                 website_url = input("Enter the website URL: ").strip()
                 if validators.url(website_url):
@@ -52,15 +61,20 @@ def get_user_input(url_list_file):
             
                 print(f"URL: {website_url}.")
 
-            while True:
-                folder_name = input("Enter the folder name to download the images to: ").strip()
-                if is_valid_folder_name(folder_name):
-                    break
-                print("Invalid folder name. Please enter a valid folder name.")
+            if choice == 'new':
+                while True:
+                    folder_name = input("Enter the folder name to download the images to: ").strip()
+                    if is_valid_folder_name(folder_name):
+                        break
+                    print("Invalid folder name. Please enter a valid folder name.")
 
-            print(f"Folder: {folder_name}.")
+                print(f"Folder: {folder_name}.")
 
-            urls = [[website_url, folder_name, max_depth]]
+                urls = [[website_url, folder_name, max_depth]]
+            else:
+                extract_links_to_csv(website_url, url_list_file)
+                urls = load_url_list(url_list_file)
+                print_url_list(urls)
 
         else:
             query = input("Enter the search query: ").strip()

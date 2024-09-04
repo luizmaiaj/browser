@@ -195,6 +195,8 @@ async def download_images_from_file(urls):
 def main():
 
     b3_nas = Nas(NAS_USERNAME, NAS_IP, NAS_PASSWORD)
+    share_name = 'home'
+    shared_folder = '/Photos/PhotoLibrary/'
 
     choice = input("Do you want to download images or clean up the NAS? (download/cleanup): ").strip().lower()
     if choice in ['download', '']:
@@ -205,9 +207,9 @@ def main():
 
             # copy files to the NAS
             for url, folder_name, depth in urls:
-                b3_nas.copy_files_to_nas_photos_library(folder_name, 'home', '/Photos/PhotoLibrary/', folder_name, delete_small_images, move_files)
+                b3_nas.copy_files_to_nas_photos_library(folder_name, share_name, shared_folder, folder_name, delete_small_images, move_files)
     elif choice == 'cleanup':
-        b3_nas.cleanup_nas_images('home', '/Photos/PhotoLibrary/', True, 'newer', 20000)
+        b3_nas.cleanup_nas_images(share_name, shared_folder, True, 'older', 20000)
     else:
         print("Invalid choice. Please enter 'download' or 'cleanup'.")
 
