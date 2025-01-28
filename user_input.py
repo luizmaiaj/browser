@@ -5,10 +5,27 @@ import validators
 from search import search_text_duckduckgo, generate_folder_name, extract_links_to_csv
 
 def is_valid_folder_name(folder_name):
-    # Placeholder for actual folder name validation
+    """
+    Validates if the given folder name is valid or not.
+    
+    Args:
+        folder_name (str): The name of the folder to be validated.
+    
+    Returns:
+        bool: True if the folder name is valid, False otherwise.
+    """
     return bool(folder_name and folder_name.strip())
 
 def load_url_list(url_list_file):
+    """
+    Loads the list of URLs from a file.
+    
+    Args:
+        url_list_file (str): The path to the file containing the list of URLs.
+    
+    Returns:
+        list: A list of URLs loaded from the file.
+    """
     if os.path.exists(url_list_file):
         with open(file=url_list_file, mode='r', encoding='utf-8') as f:
             reader = csv.reader(f, delimiter=';')
@@ -17,11 +34,29 @@ def load_url_list(url_list_file):
     return []
 
 def print_url_list(urls):
+    """
+    Prints the list of URLs and their corresponding folders.
+    
+    Args:
+        urls (List[tuple]): A list of tuples containing URL, folder name, and depth as int.
+    
+    Returns:
+        None
+    """
     print("Available URLs and corresponding folders:")
     for idx, (url, folder, depth) in enumerate(urls, start=1):
         print(f"{idx}. URL: {url}, Folder: {folder}, Depth: {depth}")
 
 def get_user_input(url_list_file):
+    """
+    This function initializes default values for processing URLs.
+    
+    Args:
+        url_list_file (str): The path to the file containing a list of URLs, folders, and depth values.
+    
+    Returns:
+        tuple: A tuple containing the selected choice ('new') and the list of URLs.
+    """
     choice = 'new'
     urls = load_url_list(url_list_file)
 
